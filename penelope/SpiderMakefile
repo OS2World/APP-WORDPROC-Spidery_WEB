@@ -1,0 +1,9 @@
+tangle: processed-a.spider
+weave: processed-a.spider
+processed-a.spider: a.spider scan_annotations.awk
+	awk -f scan_annotations.awk < a.spider > processed-a.spider
+	chmod -w processed-a.spider
+clean:	# do nothing
+	echo spider files need no cleaning
+
+	

@@ -1,0 +1,245 @@
+# Copyright 1989 by Norman Ramsey, Odyssey Research Associates
+# To be used for research purposes only
+# For more information, see file COPYRIGHT in the parent directory
+language Larch extension larch
+
+comment begin <"%"> end newline
+line begin <"%line">
+
+at_sign @
+
+default mathness yes
+
+ilk all_like category all
+ilk by_like category by
+ilk constrains_like category constrains
+ilk converts_like category gclause
+ilk div_like category binop
+ilk fi_like category fi
+ilk for_like category for
+ilk gen_like category gen
+ilk if_like category if
+ilk implies_like translation <*-indent>
+ilk imports_like category imports
+ilk intro_like category intro translation <*-indent>
+ilk is_like category is
+ilk then_like category then
+ilk trait_like category trait
+ilk with_like category with
+
+reserved all
+reserved assumes ilk imports_like
+reserved by
+reserved constrains
+reserved converts ilk converts_like
+reserved div ilk div_like
+reserved else ilk then_like
+reserved exempts
+reserved fi
+reserved for
+reserved generated ilk gen_like
+reserved if
+reserved implies
+reserved imports
+reserved includes ilk imports_like
+reserved introduces ilk intro_like 
+reserved is
+reserved mod ilk div_like
+reserved partitioned ilk gen_like
+reserved rem ilk div_like
+reserved so
+reserved that
+reserved then
+reserved trait
+reserved with
+
+ilk and_like category binop translation <"\\wedge"> mathness yes
+ilk or_like category binop translation <"\\vee"> mathness yes
+ilk not_like category unop translation <"\\neg"> mathness yes
+
+reserved and
+reserved or
+reserved not
+
+ilk forall_like category unop translation <"\\forall"> mathness yes
+reserved forall
+
+
+simp colon trait <indent> --> tbegin
+tbegin ? <outdent-force> tbegin --> tbegin
+tbegin <force> decl --> tbegin
+
+[ intro <outdent-force> ] constrains --> decl constrains
+intro <force> decl --> intro
+math colon --> mcolon
+mcolon (simp|comma) --> mcolon
+mcolon arrow simp --> decl
+
+imports simp with open --> sublist
+
+# following special for David
+imports simp open --> imbrace
+imbrace (math|comma) --> imbrace
+imbrace close with open --> sublist
+imbrace close --> decl
+# end David
+
+imports simp --> decl
+
+sublist for --> subfor
+sublist ? --> sublist
+subfor comma --> sublist
+subfor close --> decl
+subfor ? --> subfor
+
+
+constrains open --> conslist
+conslist math comma <opt-5> --> conslist
+conslist math close so that <indent> --> consintro
+
+consintro <force> decl --> consintro
+[ consintro ] (implies|tbegin) --> decl (implies|tbegin)
+
+simp is gen by --> gclause
+gclause open --> glist
+glist math comma --> glist
+glist math close comma <opt-5> --> gclause
+# do the following because converts is also a gclause
+glist math close <indent-force> exempts --> exemptions
+glist math close --> decl
+
+exemptions math comma <opt-7> --> exemptions
+exemptions math <outdent> --> decl
+
+for all open --> forlist
+forlist (simp|comma|colon) --> forlist
+forlist semi <opt-3> --> forlist
+forlist close <indent> --> forintro
+
+[ forintro <outdent-force> ] (implies|tbegin|gclause) --> decl (implies|tbegin|gclause)
+[ forintro <outdent> ] simp is gen by --> decl simp is gen by
+forintro <force> (relation|decl) --> forintro
+forintro <outdent-force> forintro --> forintro
+
+consintro <force> forintro --> consfor
+consfor <outdent-force> forintro --> consfor
+
+[ consfor <outdent-outdent-force> ] (implies|tbegin|gclause) --> decl (implies|tbegin|gclause)
+[ consfor <outdent> ] simp is gen by --> consintro simp is gen by
+consfor <force> (relation|decl) --> consfor
+
+implies <force> (decl|relation) --> implies
+[ implies ] tbegin --> decl tbegin
+
+math rel --> mathrel
+mathrel math (binop|rel) --> mathrel
+mathrel [ math open ] --> mathrel open
+[ mathrel open math close ] open --> relation open
+mathrel math --> relation
+math open --> open
+math binop math --> math
+unop math --> math
+open math comma --> open
+open math close --> math
+open [ relation ] --> open math
+open [ math <"\\&{WEAVE\\_ERROR!}"> math ] --> open math
+[ math ] math --> relation math
+
+if (math|relation) then --> if
+if (math|relation) fi --> math
+
+
+decl <force> (decl|relation) --> decl
+relation <force> relation --> relation
+relation <force> decl --> decl
+
+module definition decl use math
+
+token identifier category simp mathness yes
+token number category math mathness yes
+token newline category ignore_scrap mathness maybe translation <>
+token pseudo_semi category ignore_scrap mathness maybe translation <>
+
+default mathness yes translation <*>
+
+# use backslash for subscripts
+token \ category backslash translation <"_"> tangleto <"_"> mathness yes
+math backslash <"{"> math <"}"> --> math
+
+token + category binop
+token - category binop
+token * category binop
+token / category binop
+token ** category binop translation <"\\mathbin{{*}{*}}">
+token . category binop
+
+token & category binop translation <"\\wedge">
+token | category binop translation <"\\vee">
+token ~ category unop translation <"\\neg"> 
+
+token < category rel
+token > category rel
+token = category rel
+token != translation <"\\I"> category rel
+token <= translation <"\\L"> category rel
+token >= translation <"\\G"> category rel
+token => translation <"\\Rightarrow"> category rel
+
+token # translation <"\\#"> category simp
+token ( category open
+token [ category open
+token [[ category open translation <"\\dsl">
+token {[ category open translation <"\\dcl">
+token { category open translation <"\\{">
+token << category open translation <"\\LN">
+token ) category close
+token ] category close
+token ]] category close translation <"\\dsr">
+token ]} category close translation <"\\dcr">
+token } category close translation <"\\}">
+token >> category close translation <"\\RN">
+
+macros begin
+\let\LN\langle
+\let\RN\rangle
+\def\dsl{[\![}
+\def\dsr{]\!]}
+\def\dcl{\{\![}
+\def\dcr{]\!\}}
+macros end
+
+token , category comma mathness yes translation <",\\,">
+token ; category semi
+token : category colon
+token -> translation <"\\MG"> category arrow
+macros begin
+\let\MG\rightarrow
+macros end
+
+
+### Hacks for David: is, when
+default mathness yes
+token <- category binop translation <"\\leftarrow"> 
+token .. category binop translation <"..">
+token ... category ignore_scrap translation <"\\ldots">
+token /= translation <"\\I"> category rel
+token ^ category hat translation <> mathness maybe
+token :: category binop translation <":"> mathness maybe
+
+hat <"\\"-space> (simp|is) <"\\"-space> hat --> binop
+simp <"\\"-space> hat hat --> unop
+
+open close --> math
+
+##########################
+# the following must be last
+
+simp --> math
+
+# if semi is not in a for list, treat it as a binary operator
+semi --> binop
+
+
+
+? ignore_scrap --> #1
+

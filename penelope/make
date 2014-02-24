@@ -1,0 +1,5 @@
+#!/bin/csh -f
+# awk -f scan_annotations.awk < a.spider > processed-a.spider
+/bin/make -f SpiderMakefile $*
+/bin/make -f ../master/WebMakefile \
+ THETANGLE=adatangle THEWEAVE=adaweave SPIDER=processed-a.spider $*

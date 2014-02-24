@@ -1,0 +1,220 @@
+# Copyright 1989 by Norman Ramsey, Odyssey Research Associates
+# To be used for research purposes only
+# For more information, see file COPYRIGHT in the parent directory
+language Synthesizer extension ssl
+
+at_sign #
+
+comment begin <"/*"> end <"*/">
+
+default translation <*> mathness yes
+
+token identifier category simp mathness yes
+token number category literal mathness yes
+token newline category ignore_scrap mathness maybe translation <>
+token pseudo_semi category semi mathness maybe translation <>
+
+module definition decl use math
+
+token + category binop
+token - category unorbinop
+token * category star
+token / category binop
+token < category less translation <>
+token > category greater translation <>
+token = category binop
+token . category binop
+token ^ category at translation <"\\H">
+token ~ category unorbinop translation <"\\TI">
+token & category unop translation <"\\AMP">
+token ? translation <"\\?"> category question
+token % translation <"\\%"> category binop
+token @ category at mathness no
+token .. category at translation <"..">
+# following must tangleto " # " because # at beginning of line freaks
+# The preprocessor -- this doesn't look like preproc directive...
+token # translation <"\\SH"> category unorbinop tangleto <space-"#"-space>
+token ( category open
+token [ category lbrack
+token ) category close
+token ] category close
+token { translation <"\\{"> category lbrace
+token } translation <"\\}"> category close
+token , category comma
+token ; category semi
+token : category colon
+token | category bar
+token $ category dollar translation <"\\DO">
+token != name not_eq translation <"\\I"> category binop
+token <= name lt_eq translation <"\\L"> category binop
+token >= name gt_eq translation <"\\G"> category binop
+token == name eq_eq translation <"\\S"> category binop
+token && name and_and translation <"\\W"> category binop
+token || name or_or translation <"\\V"> category binop
+token -> name minus_gt translation <"\\MG"> category binop
+token >> name gt_gt translation <"\\GG"> category binop
+token << name lt_lt translation <"\\LL"> category binop
+token :: name double_colon translation <"::"> category binop
+token ::= name produces translation <"\\CCE"> category colon
+
+macros begin
+\def\AMP{{\sl\amp}}
+\def\SH{\mathbin{\#}}
+\def\CCE{::=}
+\def\MG{\mathrel{\to}}
+\def\GG{\mathrel{>\!>}}
+\def\LL{\mathrel{<\!<}}
+\let\LN\langle
+\let\RN\rangle
+\let\openbraces=\{
+\let\closebraces=\}
+\def\{{\ifmmode\openbraces\else$\openbraces$\fi}
+\def\}{\ifmmode\closebraces\else$\closebraces$\fi}
+\let\dothickspace=\;
+\def\;{\ifmmode\dothickspace\else\relax$\dothickspace$\relax\fi}
+\let\domedspace=\>
+\def\>{\ifmmode\domedspace\else\relax$\domedspace$\relax\fi}
+\let\dothinspace=\,
+\def\,{\ifmmode\dothinspace\else\relax$\dothinspace$\relax\fi}
+\def\?{\mathrel?}
+\def\MO{\mathord{}} % to fake out math ::= <force>
+macros end
+
+
+ilk and_like category and
+ilk in_like category in
+ilk let_like category let translation <*-indent-"\\"-space-opt-0>
+ilk math_like category math
+ilk on_like category on
+ilk transform_like category transform
+ilk with_like category with
+
+reserved and ilk and_like
+reserved as ilk math_like
+reserved class ilk math_like
+reserved default ilk math_like
+reserved demand ilk math_like
+reserved exported ilk math_like
+reserved ext_computers ilk math_like
+reserved false ilk math_like
+reserved foreign ilk math_like
+reserved in ilk in_like
+reserved inh ilk inh_like
+ilk inh_like category math translation <"\\&{inherited}">
+reserved inherited ilk math_like
+reserved left ilk math_like
+reserved list ilk math_like
+reserved let ilk let_like
+reserved local ilk math_like
+reserved nil ilk math_like
+reserved nil_attr ilk math_like
+reserved nonassoc ilk math_like
+reserved on ilk on_like
+reserved optional ilk math_like
+reserved prec ilk math_like
+reserved repeated ilk math_like
+reserved right ilk math_like
+reserved root ilk math_like
+reserved store ilk math_like
+reserved style ilk math_like
+reserved syn ilk syn_like
+ilk syn_like category math translation <"\\&{synthesized}">
+reserved synthesized ilk math_like
+reserved transform ilk transform_like
+reserved true ilk math_like
+reserved typedef ilk math_like
+reserved with ilk with_like
+
+at colon <opt-3> --> math
+at <opt-5> --> math
+decl <force> decl --> decl
+decl <force> simp* colon <"\\MO"-indent-force> --> mbar
+decl simp [ simp* ] --> decl simp math
+dollar dollar --> math
+dollar --> unop
+<force> in open <indent-force> --> wbegin
+in --> math
+# following for semantic equations and attribute declarations
+lbrace <indent-force> (decl) <force> close <outdent-force> --> math
+# following for attribution expression
+math lbrace close --> math
+# following for function declaration MUST PRECEDE "open math close"
+# we need (math|decl) because it might hit attribute decl too
+open math close lbrace --> openfunc
+open math [ close ignore_scrap ] --> open math close
+openfunc <indent-force> (math|decl) <force> close <outdent-force> --> math
+# Now in the hideous case where we have mistakenly confused an attribution 
+# 	expression for a function declaration, we correct our error
+openfunc close --> math
+# following for upward remote attribute reference
+lbrace math close --> math
+
+lbrack <indent> math <outdent> close --> math
+
+
+
+math <force> bar --> math
+math colon <"\\MO"> --> mcolon
+
+math open close --> math
+# no space here
+math <"\\;"-opt-0> lbrack --> lbrack
+
+[ star ] colon --> math colon
+math star --> unop
+star --> math
+
+math <"\\>"> math --> math
+math (binop|unorbinop) math --> math
+math unop --> math
+(unop|unorbinop) math --> math
+
+math semi --> decl
+
+mbar math <force> bar --> mbar
+mbar math <force> semi <outdent> --> decl
+
+mcolon <indent-force> math <force> semi <outdent> --> decl
+mcolon <indent-force> math <outdent-force> close --> close
+mcolon <indent-force> math comma --> mcmcom
+
+mcmcom math comma --> mbar
+mcmcom <outdent-force> math colon <"\\MO"> --> mcolon
+
+
+math comma <"\\,"> math --> math
+
+
+on --> math
+open math close --> math
+open close --> math
+# The following doesn't do indentation right
+# <indent-force> question math <force> colon ? <outdent> - - > #4
+<indent-force> question math <force> colon --> condbegin
+[ condbegin math <outdent> ] (semi|close|comma|colon) --> math (semi|close|comma|colon)
+
+less <"\\LN"> simp <"\\RN"> greater --> math
+less <"<"> --> binop
+greater <">"> --> binop
+
+literal <opt-5> --> math
+simp --> math
+tbegin <indent-force> decl <outdent> --> decl
+transform <"\\;"> math --> tbegin
+wbegin math close <outdent-force> --> math
+wbegin close <outdent-force> --> math
+# following for leaving commas in last clause in with statements
+wbegin mcmcom <outdent-force> close <outdent-force> --> math
+with math (math|semi) --> math
+with math <"\\,"> open <indent-force> --> wbegin
+
+# let statements
+math <"\\"-space-opt-3> and <"\\"-space> math --> math
+(forcelet|let) math semi <force> --> forcelet
+forcelet math <outdent-force> in <"\\"-space> open <indent-force> --> letopen
+letopen math <force> close <outdent> --> math
+let math in <"\\"-space> open <indent-force> --> letopen
+# following recognizes semi as a possible terminator as well as separator
+forcelet <backup> in <"\\"-space> open <force> --> letopen
+
+? ignore_scrap --> #1

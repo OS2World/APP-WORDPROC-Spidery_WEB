@@ -1,0 +1,2 @@
+/bin/make -f ../master/WebMakefile \
+ THETANGLE=ltangle THEWEAVE=lweave SPIDER=l.spider $*

@@ -1,0 +1,1693 @@
+% Copyright 1989 by Norman Ramsey and Odyssey Research Associates
+% To be used for research purposes only
+% For more information, see file COPYRIGHT in the parent directory
+
+% spiderman.tex, with apologies to Stan Lee 
+
+\documentstyle[11pt]{article}
+\setcounter{secnumdepth}{0}
+\newcommand{\syntax}[1]{\mbox{$\langle\hbox{\sl #1\/}\rangle$}}
+\newcommand{\produces}{\mbox{${}::={}$}}
+\newcommand{\opt}[1]{$[$#1$]$}
+\newcommand{\BS}{\relax}
+\chardef\BS=`\\ % backslash in a string
+
+\title{A {Spider} User's Guide}
+\author{Norman Ramsey\\Department of Computer Science\\Princeton University}
+\date{July 1989}
+\newcommand {\WEB}{{\tt WEB}}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+Donald Knuth developed the {\tt WEB} system of structured documentation 
+as part of the {\TeX} project~\cite{knuth:literate-programming}.
+{\WEB} enables a programmer to divide his or her program into chunks (called
+{\em modules}), to associate text with each chunk, and to present the
+chunks in in any order.
+In Knuth's implementation, the chunks are pieces of PASCAL programs,
+and the chunks are formatted using {\TeX}.
+
+  The {\tt WEB} idea suggests a way of combining {\em any}
+programming language with {\em any} document formatting language,
+but until recently there was no software support for writing anything
+but PASCAL programs using {\tt WEB}.
+In~1987, Silvio Levy rewrote the {\tt WEB} system in C for C,
+while retaining {\TeX} as the formatting language~\cite{levy:cweb}.
+I have has modified Levy's implementation by removing the parts
+that  make C the target programming language, and I have
+ added a third tool, {Spider}, which complements {\tt WEAVE}
+and {\tt TANGLE}.
+{Spider} reads a description of a programming language, and writes
+source code for a {\tt WEAVE} and {\tt TANGLE} which support that
+language. 
+Using {Spider}, a C~compiler, and an Awk~interpreter, an experienced
+systems programmer can generate  a {\tt WEB} system for
+an Algol-like language in a few hours.
+
+This document explains how to use {Spider} to generate a {\WEB}
+system for any programming language.
+(The choice of programming language is limited only by the lexical
+structure built into Spidery {\tt WEB}, as we shall see.)
+You should consult the companion document, ``The Spidery {\WEB} system of
+structured documentation,'' to learn how to use the generated {\WEB} system.
+
+\paragraph{Prerequisites}
+If you are going to use {Spider} to build a {\WEB} system,
+you  should be comfortable using {\tt WEB}.
+To get an idea how {\tt WEB} works, you should have read Knuth's
+introductory article 
+on {\WEB}~\cite{knuth:literate-programming}, as well as the {\WEB}
+users' manual.
+(The {\WEB} user's manual is pretty heavy going, so you may want to
+consult the Bibliography for more introductory material on {\WEB}.
+Wayne Sewell's {\it Weaving a Program: Literate Programming in {\tt
+WEB}}
+may be helpful~\cite{sewell:weaving}.)
+
+In what follows we will assume that you know what {\tt WEAVE} and {\tt
+TANGLE} are, what input they expect, and what output they produce.
+
+\paragraph{Plan of this guide}
+We'll begin with a review of weaving and tangling, so that we can get
+an idea what is necessary to build a language-independent {\WEB}.
+Then we'll present a discussion of the features of {Spider} that
+tell {\WEB} about the programming language.
+We'll define these in detail and give some examples, and then 
+we'll close with a complete description of the {Spider} language
+and tools.
+
+\section{How {\tt WEAVE} and {\tt TANGLE} see the world}
+Both {\tt WEAVE} and {\tt TANGLE} operate on the same input, a {\WEB}
+file.
+{\tt WEAVE} must examine this input and produce a {\TeX} text, while
+{\tt TANGLE} must produce a program text from the same input.
+The input consists of {\TeX} parts, definition parts, and code parts.
+The {\TeX} parts are the easiest to consider: {\tt WEAVE} just copies
+them and {\tt TANGLE} throws them away.
+The definition parts are a bit more complicated: {\tt WEAVE}'s job is
+to typeset them, while {\tt TANGLE} must remember the definitions and
+expand them at the proper time.
+The code parts are the most complex of all: {\tt WEAVE} must
+prettyprint them, and {\tt TANGLE} must rearrange them into a coherent
+program text.
+
+\paragraph{Lexical analysis in {\WEB}}
+Both {\tt WEAVE} and {\tt TANGLE} interpret the code parts as a stream
+of {\em tokens}.
+Since not all programming languages have the same tokens, it is 
+{Spider}'s job to tell {\tt WEAVE} and {\tt TANGLE} how to tokenize the
+input.%
+\footnote{%
+The current implementation of {\tt WEB}'s lexical analysis is limited.
+It should be replaced with something using regular
+expressions.% 
+}
+A Spidery {\WEB} system can recognize the following kinds of
+tokens:
+\begin{itemize}
+\item identifiers
+\item numeric and string constants
+\item newlines
+\item ``pseudo-semicolons'' (the token {\tt @;})
+\item reserved words
+\item non-alphanumeric tokens
+\end{itemize}
+
+{\tt TANGLE} rearranges these tokens into one long program
+text, then writes out the program text token by token.
+Normally, {\tt TANGLE} puts no white space between tokens, but it
+will put blanks between adjacent identifier, reserved word, and
+numeric constant tokens.
+Thus the input
+\begin{quote}
+\tt if 0 > x-y then z := -1;
+\end{quote}
+will be written out as
+\begin{quote}
+\tt if 0>x-y then z:=-1;
+\end{quote}
+and not
+\begin{quote}
+\tt if0>x-ythenz:=-1;
+\end{quote}
+which wouldn't parse.
+When it is desirable to have {\tt TANGLE} translate
+the tokens differently, each token can be given a {\tt tangleto}
+attribute, which specifies what  program text is printed out for that
+token.
+For example, 
+the {\tt spider} file used to generate C~{\WEB} forces the {\tt =}
+tokento be printed out as the string {\tt "=\ "}, because in C the string
+{\tt "=-"} can be ambiguous.
+
+{\tt WEAVE} must turn the token stream into a {\TeX} text that will
+cause the code to be prettyprinted.
+It does so in three steps:
+\begin{enumerate}
+\item 
+{\tt WEAVE} turns each token into a {\em scrap}.
+A scrap has two important properties: its syntactic 
+{\em category} and its {\em translation}.
+The categories are symbols in a prettyprinting grammar; that grammar
+tells {\tt WEAVE} how to combine the scraps
+with prettyprinting instructions.
+The translations are the {\TeX} texts that will tell {\TeX} exactly
+how to print the scraps.
+\item
+{\tt WEAVE} reduces the scrap stream by combining scraps according to
+the productions of its prettyprinting grammar.
+({\tt WEAVE} does a kind of shift-reduce parsing of program fragments.)
+While combining the translations, {\tt WEAVE} adds {\TeX} text that
+will cause indenting, outdenting, line breaking, and so on.
+\item
+Ideally, {\tt WEAVE} keeps reducing scraps until it has a single scrap with
+a very long translation, but perhaps it will end up
+with an irreducible sequence of scraps.
+In any case, after no more reductions can be done, the translations of the
+remaining scraps are output one at a time.
+\end{enumerate}
+
+\section{Using {Spider} to tell {\WEB} how to tokenize}
+{Spider} divides tokens into two classes; reserved words and
+other.
+The reserved words as specified using the {\tt reserved} and {\tt ilk}
+commands; the other tokens are specified using the {\tt token}
+command.
+(This somewhat unusual setup is dictated by the way {\tt
+WEAVE} works; its advantage is that is is easy to define a whole group
+of reserved words that will be treated identically.)
+Here's how it works: the {\tt reserved} command designates
+ a particular identifier as a reserved word, and says
+what {\em ilk} it belongs to.
+The {\tt token} and {\tt ilk} commands tell {\tt WEAVE} and {\tt
+TANGLE} what to do with a particular token, or with all the reserved
+words of a particular ilk.
+For each token or ilk one can specify the {\em tangleto} field, the
+token's {\em mathness} (whether it has to be typeset in math mode), and
+its {\em category} and {\em translation} (for conversion to scraps).
+All but the category can have defaults, set with the {\tt defaults}
+command.
+Choice of category names is up to the user.
+
+We will discuss the tokenization commands more later when we present
+the syntax of {Spider} in detail.
+Meanwhile, 
+here are some example tokenization commands from the {\tt spider} file
+for~C:
+\begin{verbatim}
+token + category unorbinop
+token - category unorbinop
+token * category unorbinop
+token = category equals translation <"\\leftarrow"> tangleto <"="-space>
+token ~ category unop translation <"\\TI">
+token & category unorbinop translation <"\\amp">
+token ^ translation <"\\^"> category binop
+token ? translation <"\\?"> category question
+token % translation <"\\%"> category binop
+token # translation <"\\#"> category sharp
+token ! category unop translation <"\\neg">
+token ( category lpar
+token ) category rpar
+token [ category lpar
+token ] category rpar
+token { translation <"\\{"> category lbrace
+token } translation <"\\}"> category rbrace
+token ++ category unop translation <"\\PP">
+token -- category unop translation <"\\MM">
+token != translation <"\\I"> category binop
+token == translation <"\\S"> category binop
+token && translation <"\\W"> category binop
+
+ilk case_like category case
+ilk int_like category int
+
+reserved auto ilk int_like
+reserved break ilk case_like
+reserved case ilk case_like
+reserved char ilk int_like
+\end{verbatim}
+These show the definitions of some of the tokens used in C.
+Notice the {\tt tangleto} option is almost always left to default, and
+the {\tt translation} option is often left to default.
+
+Once the tokens are specified, and each has a {\tt tangleto} string,
+we can almost construct a {\tt TANGLE} for the language. 
+ Before we can construct a {\tt WEAVE}, we have to tell it how to
+combine and reduce scraps.
+
+\section{Using {Spider} to tell {\tt WEAVE} how to reduce scraps}
+The most intricate part of {\tt WEAVE} is its mechanism for converting
+programming language code into \TeX\ code.
+{\tt WEAVE} uses a simple bottom-up parsing algorithm, since it
+ must deal with fragmentary
+constructions whose overall ``part of speech'' is not known.
+
+The input is represented as a sequence of  {\em scraps}, 
+where each scrap of information consists
+of two parts, its {\em category} and its {\em translation}. 
+The category
+is essentially a syntactic class, and the translation represents
+{\TeX} code.
+Rules of syntax and semantics tell us how to
+combine adjacent scraps into larger ones, and if we are lucky an entire
+program text that starts out as hundreds of small scraps will join
+together into one gigantic scrap whose translation is the desired \TeX\
+code. 
+If we are unlucky, we will be left with several scraps that don't
+combine; their translations will simply be output, one by one.
+
+The combination rules are given as context-sensitive productions that are
+applied from left to right. Suppose that we are currently working on the
+sequence of scraps $s_1\,s_2\ldots s_n$. We try first to find the longest
+production that applies to an initial substring $s_1\,s_2\ldots\,$; but if
+no such productions exist, we find to find the longest production
+applicable to the next substring $s_2\,s_3\ldots\,$; and if that fails, we
+try to match $s_3\,s_4\ldots\,$, et cetera.
+
+A production applies if the category codes have a given pattern. For
+example, if one of the productions is
+$$\hbox{\tt open [ math semi <"\BS\BS,"-opt-5> ] -->
+open math}$$ 
+then it means that three consecutive scraps whose respective categories are
+{\tt open}, {\tt math}, and {\tt semi} are con\-verted to two scraps whose categories
+are {\tt open} and {\tt math}. 
+ The {\tt open} scrap has not changed, while the string 
+{\tt <"\BS\BS,"-opt-5>} 
+indicates that the new {\tt math} scrap
+has a translation composed of the translation of the original
+{\tt math} scrap followed by the translation of the {\tt semi} scrap followed
+by `{\tt \BS,}' followed by `{\tt opt}' followed by `{\tt5}'. (In the \TeX\ file,
+this will specify an additional thin space after the semicolon, followed
+by an optional line break with penalty 50.) 
+Translations are enclosed in angle brackets, and may contain quoted
+strings (using the C conventions to escape backslashes and so on), or
+may contain special keywords.
+
+Before giving examples of useful productions, we'll break to give the
+detailed syntax of the {Spider} subset covered so far.
+
+
+
+\section{Syntax of {\tt spider} files}
+
+{Spider} is an Awk program which converts a description of a
+language into C~code for {\tt WEAVE} and {\tt TANGLE}.
+Since {Spider} is an Awk program, its input is a sequence of
+lines, and all {Spider} commands must fit on one line.
+
+\paragraph{Comments and blank lines}
+Because {\em any} character sequence can be a token of a programming
+language, we can't just designate a particular sequence as a ``begin
+comment'' marker.
+So in {Spider} there are no comments, only {\em comment lines}.
+A comment line is one whose first character is ``{\tt \#}''.
+The {Spider} processor ignores comment lines and blank lines.
+
+\paragraph{Fields}
+Each command in the {\tt spider} file consists of a sequence of {\em
+fields}.
+These are just the Awk fields, and they are separated by white space.
+This feature of {Spider} (inherited from Awk) forbids the use of
+white space within a field.
+
+\subsection{Translations}
+Most fields in a {Spider} file are simple identifiers, or perhaps
+strings of non-alphanumeric characters.
+The major exception is {\em translations}.
+Translations are always surrounded by angle brackets ({\tt <>}),
+and consist of a (possibly empty) list of translation pieces.
+The pieces on a list are separated by dashes ({\tt -}).
+A piece is one of:
+\begin{itemize}
+\item A quoted string.
+This string may contain embedded quotes escaped by ``\verb+\+'', but
+it {\em must not} contain embedded white space or an embedded dash.
+\item The ``self'' marker, ``{\tt *}'',
+ refers to the sequence of characters making up the token being
+translated.
+The self marker is permitted only in certain contexts, and its precise
+meaning depends on the context.
+\item A digit.
+\item A key word.
+The key words known to {Spider} are
+\begin{description} 
+\item [\tt space] Stands for one space ({\tt "\ "}).
+\item[\tt dash] Stands for a dash ({\tt "-"}).
+\end{description}
+The other key words are passed on to {\tt WEAVE}.
+
+{\tt WEAVE} recognizes the following key words:
+\begin{description}
+\item[\tt break\_space] denotes an optional line break or an en space;
+\item[\tt force] denotes a line break;
+\item[\tt big\_force] denotes a line break with additional vertical space;
+\item[\tt opt] denotes an optional line break (with the continuation
+line indented two ems with respect to the normal starting position)---this
+code is followed by an integer $n$, and the break will occur with penalty
+$10n$;
+\item[\tt backup] denotes a backspace of one em;
+\item[\tt cancel] obliterates any {\tt break\_space} or {\tt force} or
+{\tt big\_force} 
+tokens that immediately precede or follow it and also cancels any
+{\tt backup} tokens that follow it;
+\item[\tt indent] causes future lines to be indented one more em;
+\item[\tt outdent] causes future lines to be indented one less em.
+\item[\tt math\_rel] translates to \verb+\mathrel{+
+\item[\tt math\_bin]translates to \verb+\mathbin{+
+\item[\tt math\_op] translates to \verb+\mathop{+
+\end{description}
+The {\em only} key words that will work properly in math mode are {\tt
+indent} and {\tt outdent}, so when you're defining the translations of
+tokens you must use {\tt mathness~no} if your translations contain
+other key words.
+You may use any recognized key words in the translations of a
+production; there the mathness is automatically taken care of for you.
+\end{itemize}
+
+Here are some example translations:
+\begin{verbatim}
+<"\\"-space>
+<indent-force>
+<"{\\let\\\\=\\bf"-space>
+<"}"-indent-"{}"-space>
+\end{verbatim}
+
+\paragraph{Restricted translations}
+In some cases, notably for a {\tt tangleto} description, translations
+are {\em restricted}.
+A restricted translation is never converted to typesetting code,
+but is always converted to an ASCII string, usually for output by {\tt
+TANGLE}, but sometimes for other things.
+A restricted translation may contain only {\em quoted strings} and the
+keywords {\tt space} and {\tt dash}.
+
+
+\subsection{{\tt token} commands}
+The syntax of the {\tt token} command is:
+\begin{quote}
+\tt  
+\syntax{command} \produces~token \syntax{token-designator}
+\syntax{token-descriptions}
+\end{quote}
+Where \syntax{token-descriptions} is a (possibly empty) list of token
+descriptions.
+
+\paragraph{Token descriptions}
+The token descriptions are
+\begin{itemize}\parindent=0pt
+\item
+{\tt tangleto \syntax{restricted translation}}
+
+The \syntax{restricted translation} tells {\tt TANGLE} what program
+text to write out for this token.
+The only kinds of translation pieces valid in a restricted translation
+are quoted strings and the special words {\tt space} and {\tt dash}.
+If no {\tt tangleto} description is present, {\tt TANGLE} just writes
+out the sequence of characters that constitute the token.
+
+\item
+{\tt translation \syntax{translation}}
+
+Tells {\tt WEAVE} what translation to assign when making this token into
+a scrap.
+The self
+marker~({\tt*}) stands for the sequence of characters that were read in to
+make up the token.
+The translation often defaults to \verb+translation <*>+; {Spider}
+is set up to have this default initially.
+
+\item
+{\tt category \syntax{category-name}}
+
+Tells {\tt WEAVE}  what category to assign when making this token into
+a scrap.
+If you're writing a {Spider} file, you may choose any category
+names you like, subject only to the restriction that they not conflict
+with other names  known to {Spider} (e.g.~predefined key words,
+names of ilks, and so on).
+Using category names that are identical to reserved words of the
+target programming language (or reserved words of~C) is not only
+supported, it is strongly encouraged, for clarity.
+Also, when we get to the sample grammars later on, you will see some
+other conventions we use for category names.
+
+\item
+{\tt mathness \syntax{mathness-indicator}}
+
+where  \syntax{mathness-indicator} is {\tt yes}, {\tt no}, or {\tt
+maybe}.
+This indicates to {\tt WEAVE} whether the translation for this token
+needs to be typeset in {\TeX}'s math mode or not, or whether it
+doesn't matter.
+When firing productions,
+{\tt WEAVE} will place math shift characters~(\verb+$+) in the {\TeX}
+text that guarantee the placement of tokens in the correct modes.
+Tokens with the {\em empty translation} (\verb+<>+) should always have
+{\tt mathness maybe}, lest they cause {\tt WEAVE} to place two
+consecutive math shift characters.
+
+\item 
+{\tt name \syntax{token-name}}
+
+This should only be necessary in debugging {Spider} or {\WEB}.
+It causes the specified name to be attached to the token, so that a
+programmer can search for that name in the C~code generated by 
+{Spider}.
+
+\end{itemize}
+
+\paragraph{Token designators}
+{Spider} recognizes the following token designators:
+\begin{description}
+\item[{\tt identifier}]
+A {\tt token} command using this designator tells {\tt WEAVE} and {\tt
+TANGLE} what to do with identifier tokens.
+Unfortunately it is not possible to specify with {Spider} just
+what an identifier is; that definition is hard-wired into {\tt WEAVE}
+and {\tt TANGLE}.
+An identifier is the longest string matching this regular expression%
+\footnote{The reader unfamiliar with the Unix notation for regular
+expressions should consult the {\it ed(1)} man page.}:
+\begin{verbatim}
+[a-zA-Z_][a-zA-Z0-9_]*
+\end{verbatim}
+
+\item[{\tt number}]
+In the current implementation of {Spider} and {\tt WEAVE}, a {\tt token}
+command using this designator covers the treatment of both numeric
+constants and string constants.
+Like the identifiers, the definitions of what constitutes a numeric or
+string constant cannot be changed.
+{\samepage
+A numeric constant is the longest string matching%
+\footnote{There  ought to be some kind of {\WEB} control sequence to
+support floating point notation for those languages that have it.}:
+\begin{verbatim}
+[0-9]+(\.[0-9]*)?
+\end{verbatim}
+}
+A string constant is the longest string matching
+\begin{verbatim}
+\"([^"]*\\\")*[^"]*\"|'[^@\]'|'\\.'|'@@'
+\end{verbatim}
+Carriage returns may appear in string constants if escaped by a
+backslash~(\verb+\+).
+
+\item[{\tt newline}]
+A {\tt token} command using this descriptor tells {\tt WEAVE} and {\tt
+TANGLE} how to treat a newline.
+We'll see later how to make {\tt WEAVE} ignore newlines.
+
+\item[{\tt pseudo\_semi}]
+A {\tt token} command using this descriptor tells {\tt WEAVE} what to
+do with the {\WEB} control sequence {\tt @;}.
+This control sequence is always ignored by {\tt TANGLE}.
+
+\item[\syntax{characters}]
+where none of the characters is alphanumeric.
+A {\tt token} command using this descriptor defines the sequence of
+characters as a token, and tells {\tt WEAVE} and {\tt TANGLE} what to
+do with that token.
+A token may be a prefix of another token; {\tt WEAVE} and {\tt TANGLE}
+will prefer the longer token to the shorter.
+Thus, in a C~{\WEB}, \verb+==+ will be read as a single \verb+==+
+token, not as two \verb+=+ tokens.
+\end{description}
+
+
+
+
+\subsection{Reserved word tokens}
+Reserved words are attached to a particular {\em ilk} using the {\tt
+reserved} command.
+\begin{quote}
+\tt  reserved \syntax{reserved-word} $[$ilk \syntax{ilk-name}$]$
+\end{quote}
+If you're writing a {Spider} file, you may choose any ilk
+names you like, subject only to the restriction that they not conflict
+with other names known to {Spider} (e.g.~predefined key words,
+names of categories, and so on).
+The convention, however, is to use ilk {\tt with\_like} for a reserved
+word {\tt with}, and so on.%
+\footnote{%
+The existence of this convention seduced me into adding a pernicious
+feature to {Spider}---if you omit the ilk from a {\tt reserved}
+command, {Spider} will make an ilk name by appending {\tt \_like}
+to the name of the reserved word.
+Furthermore, if that ilk doesn't already exist, {Spider} will
+construct one.
+Don't use this feature.
+}
+
+The {\tt  ilk} and {\tt  token} commands have nearly identical syntax.
+The syntax of the {\tt ilk} command is:
+\begin{quote}\tt
+\syntax{command} \produces~ilk \syntax{ilk-name}
+\syntax{token-descriptions}
+\end{quote}
+In translations that appear in {\tt ilk} commands, the self
+marker~({\tt *}) designates the string of characters making up the
+reserved word, surrounded by \verb+\&{...}+, which makes the reserved
+words appear in bold face.
+
+\section{Syntax of the prettyprinting grammar}
+Defining the tokens of a language is somewhat tedious, but it is
+essentially straightforward, and the definition usually does not need
+fine tuning.
+When developing a new {\WEB} with {Spider}, you will spend most of
+your time writing the grammar that tells {\tt WEAVE} how to reduce
+scraps.
+The grammar is defined as a sequence of context-sensitive productions. 
+Each production has the form:
+\begin{quote}
+\tt 
+\syntax{left context} [ \syntax{firing instructions} ] \syntax{right context}
+\\\null\qquad
+--> \syntax{left context} \syntax{target category} \syntax{right context}
+\end{quote}
+where the left and right contexts are (possibly empty) sequences of
+scrap designators, the firing instructions are a sequence of scrap
+designators and translations (containing at least one scrap
+designator), and the target category is a category designator.
+If the left and right contexts are both empty, the square brackets
+({\tt []}) can be omitted, and the production is context free.
+The left and right contexts must be the same on both sides of the {\tt
+-->}.
+
+What does the production mean?
+Well, {\tt WEAVE} is trying to reduce a sequence of scraps.
+So what {\tt WEAVE} does is look at the sequence, to find out whether
+the left hand side of some production matches an initial subsequence
+of the scraps.
+{\tt WEAVE} picks the first matching production, and {\em fires} it,
+reducing the scraps described in the firing instructions to a single
+scrap, and it gives the new scrap the {\em target category}.
+The translation of the new scrap is formed by concatenating the
+translations in the {\em firing instructions}, where a scrap
+designator stands for the translation of the designated scrap.
+
+Here is the syntax that describes contexts, firing instructions, scrap
+designators, and so on.
+\begin{quote}
+\tt
+\syntax{left context} \produces~\syntax{scrap designators}\\
+\syntax{right context} \produces~\syntax{scrap designators}\\
+\syntax{firing instruction} \produces \syntax{scrap designator}\\
+\syntax{firing instruction} \produces \syntax{translation}\\
+\syntax{scrap designator} \produces~?\\
+\syntax{scrap designator} \produces~\opt{!}\syntax{category name}\opt{*}\\
+\syntax{scrap designator} 
+   \produces~\opt{!}\syntax{category alternatives}\opt{*}\\
+\syntax{category alternatives} 
+   \produces~\rlap{(\syntax{optional alternatives}\syntax{category name})}\\
+\syntax{optional alternative} \produces~\syntax{category name}|\\
+\syntax{target category} \produces~\#\syntax{integer}\\
+\syntax{target category} \produces~\syntax{category name}\\
+\end{quote}
+
+\paragraph{Matching the left hand side of a production}
+When does a sequence of scraps match the left hand side of a
+production?
+For matching purposes, we can ignore the translations and the square
+brackets~({\tt []}), and look at the left hand side just as a sequence
+of scrap designators.
+A sequence of scraps matches a sequence of scrap designators if and
+only if each scrap on the sequence matches the corresponding scrap
+designator.
+Here are the rules for matching scrap designators (we can
+ignore starring%
+\footnote{A category name is said to be {\em starred} if it has the
+optional {\tt *}.}%
+):
+\begin{itemize}
+\item
+Every scrap matches the designator {\tt ?}.
+\item
+A scrap matches \syntax{marked category} if and only if its category
+is the same as the category of the designator.
+\item
+A scrap matches {\tt!}\syntax{marked category} if and only if its category
+is {\em not} the same as the category of the designator.
+(The {\tt !} indicates negation.)
+\item
+A scrap matches a list of category alternatives if and only if its
+category is on the list of alternatives.
+\item
+A scrap matches a {\em negated} list of category alternatives if and
+only if its category is {\em not} on the list of alternatives.
+\end{itemize}
+
+\paragraph{Firing a production}
+Once a match is found, {\tt WEAVE} fires the production by replacing
+the subsequence of scraps matching the firing instructions.
+{\tt WEAVE} replaces this subsequence with a new scrap whose category
+is the target category, and whose translation is the concatenation of
+all the translations in the firing instructions.
+(When the new translation is constructed, the
+translations of the old scraps are included at the positions of the
+corresponding scrap designators.)
+If the target category is not given by name, but rather by
+number~({\tt \#$n$}), {\tt WEAVE} will take the category of the $n$th
+scrap in the subsequence that matches the left hand side of the
+production, and make that the target category.
+
+\subparagraph{Side effects of firing a production}
+When a production fires, {\tt WEAVE} will {\em underline the
+index entry} for the first identifier in any {\em starred} scrap.
+
+\paragraph{If no initial subsequence matches any production}
+If the initial subsequence of scraps does not match the left hand side
+of any production, {\tt WEAVE} will try to match the subsequence
+beginning with the second scrap, and so on, until a match is found.
+Once a match is found, {\tt WEAVE} fires the production, changing its
+sequence of scraps.
+It then starts all over again at the beginning of the new sequence,
+looking for a match.%
+\footnote{
+The implementation is better than that; {Spider} figures out just
+how much {\tt WEAVE} must backtrack to get the same effect as
+returning to the beginning.}
+If {\em no} subsequence of the scraps matches any production, then the
+sequence of scraps is irreducible, and {\tt WEAVE} writes out the
+translations of the scraps, one at a time.
+
+\section{Examples of {\tt WEAVE} grammars}
+This all must seem very intimidating, but it's not really.
+In this section we present some grammar fragments and explain what's
+going on.
+
+\paragraph{Short examples}
+\begin{verbatim} 
+? ignore_scrap --> #1
+\end{verbatim} 
+This production should appear in  every grammar, because Spidery {\tt
+WEAVE} expects category \verb+ignore_scrap+ to exist with roughly this
+semantics. 
+(For example, all comments generate scraps of category {\tt
+ignore\_scrap}.) 
+Any scrap of category \verb+ignore_scrap+ essentially doesn't affect
+the reduction of scraps: it is absorbed into the scrap to its left.
+
+\begin{verbatim}
+token newline category newline translation <>
+newline --> ignore_scrap
+\end{verbatim}
+This token definition and production, combined with the previous
+production, causes {\tt WEAVE} to ignore all newlines.
+
+For this next example, from the C~grammar, you will need to know that 
+{\tt math} represents a mathematical expression, {\tt semi} a
+semicolon, and {\tt stmt} a statement or sequence of statements.
+\begin{verbatim}
+math semi --> stmt
+stmt <force> stmt --> stmt
+\end{verbatim}
+The first production says that a mathematical expression, followed by
+a semicolon, should be treated as a statement.
+The second says that two statements can be combined to make a single
+statement by putting a line break between them.
+
+\paragraph{Expressions}
+This more extended example shows the treatment of expressions in Awk.
+This is identical to the treatment of expressions in C and in several
+other languages.
+We will use the following categories:
+\begin{description}
+\item[math] A mathematical expression
+\item[binop] A binary infix operator
+\item[unop] A unary prefix or postfix operator
+\item[unorbinop] An operator that could be binary infix or unary
+prefix
+\end{description}
+To show you how these might be used, here are some sample token
+definitions using these categories:
+\begin{verbatim}
+token + category unorbinop
+token - category unorbinop
+token * category binop
+token / category binop
+token < category binop
+token > category binop
+token , category binop translation <",\\,"-opt-3>
+token = category binop translation <"\\K">
+token != translation <"\\I"> category binop
+token == name eq_eq translation <"\\S"> category binop
+token ++ name gt_gt category unop translation <"\\uparrow">
+token -- name lt_lt category unop translation <"\\downarrow">
+\end{verbatim}
+Notice that the translation for the comma specifies a thin space and
+an optional line break after the comma.
+The translations of {\tt =},  {\tt !=}, and {\tt ==} 
+produce~$\leftarrow$, $\ne$, and~$\equiv$. 
+
+Here is the grammar for expressions.
+\begin{verbatim}
+math (binop|unorbinop) math --> math
+(unop|unorbinop) math --> math
+math unop --> math
+math <"\\"-space> math --> math
+\end{verbatim}
+In Awk there is no concatenation operator; concatenation is by
+juxtaposition.
+The last production tells {\tt WEAVE} to insert a space between two
+juxtaposed expressions.
+
+So far we haven't dealt with parentheses, but that's easily done:
+\begin{verbatim}
+token ( category open
+token ) category close
+token [ category open
+token ] category close
+open math close --> math
+\end{verbatim}
+
+
+Now this grammar just given doesn't handle the Awk or C {\tt +=}
+feature very well; {\tt x+=1} comes out as~$x+\leftarrow 1$, and {\tt
+x/=2} is irreducible!
+Here's the cure; first, we make a new category for assignment:
+\begin{verbatim}
+token = category equals translation <"\\K">
+\end{verbatim}
+And then we write productions that reduces assignment (possibly
+preceded by another operator) to a binary operator:
+\begin{verbatim}
+<"\\buildrel"> (binop|unorbinop) <"\\over{"> equals <"}"> --> binop
+equals --> binop
+\end{verbatim}
+Notice that, given the rules stated above, the second production can
+fire only if {\tt equals} is {\em not} preceded by an operator.
+On input~{\tt x+=1}, the first production fires, and we have the
+translation~$x\buildrel+\over{\leftarrow} 1$. 
+
+\paragraph{Conditional statements}
+Here is the grammar for (possibly nested) conditional statements in
+Awk.
+\begin{verbatim}
+if <"\\"-space> math --> ifmath
+ifmath lbrace --> ifbrace
+ifmath newline --> ifline
+ifbrace <force> stmt --> ifbrace
+ifbrace <outdent-force> close else <"\\"-space> if --> if
+ifbrace <outdent-force> close else lbrace --> ifbrace
+ifbrace <outdent-force> close else newline --> ifline
+ifbrace <outdent-force> close --> stmt
+(ifline|ifmath) <indent-force> stmt <outdent> --> stmt
+\end{verbatim}
+It relies on the following token definitions:
+\begin{verbatim}
+ilk if_like category if
+reserved if
+ilk else_like category else
+reserved else
+token { translation <"\\;\\{"-indent> category lbrace
+token } translation <"\\}\\"-space> category close
+token newline category newline translation <>
+\end{verbatim}
+
+\paragraph{Handling preprocessor directives in C}
+Here is a simplified version of 
+the grammar that handles C preprocessor directives.
+It puts the directives on the left hand margin, and correctly handles
+newlines escaped with backslashes.
+(The full version is also able to distinguish {\tt <...>}
+bracketing a file name from the use of the same symbols to mean ``less
+than'' and ``greater than.'')
+{\small\advance\hsize 1in
+\begin{verbatim}
+# control sequence \8 puts things on the left margin
+<"\\8"> sharp <"{\\let\\\\=\\bf"-space> math <"}"-indent-"{}"-space> --> preproc
+preproc backslash <force-"\\8\\hskip1em"-space> newline --> preproc
+<force> preproc <force-outdent> newline --> ignore_scrap
+preproc math --> preproc
+newline --> ignore_scrap
+\end{verbatim}
+}
+The \verb+\let+ in the first production makes the identifier following
+the {\tt \#} come out in bold face.
+
+
+\subsection{Using context-dependent productions}
+So far we've been able to do a lot without using the
+context-dependent features of {Spider} productions.
+(For example, the entire {\tt spider} file for Awk is written using
+only context-free productions.)
+Now we'll show some examples that use the context-dependence.
+
+In the grammar for Ada, a semicolon is used as a terminator for
+statements.
+But semicolons are also used as {\em separators} in parameter
+declarations.
+The first two productions here find the statements, but the third
+production supersedes them when a semicolon is seen in a parenthesized
+list.
+\begin{verbatim}
+semi --> terminator
+math terminator --> stmt
+open [ math semi ] --> open math
+\end{verbatim}
+
+
+\paragraph{Underlining the index entry for the name of a declared
+function}
+In SSL, function declarations begin with the type of the function
+being declared, followed by the name of that function.
+The following production causes the index entry for that function to
+be underlined, so that we can look up the function name in the index
+and easily find the section in which the function is declared:
+\begin{verbatim} 
+decl simp [ simp* ] --> decl simp math
+\end{verbatim}
+Where we've relied on
+\begin{verbatim}
+token identifier category simp mathness yes
+\end{verbatim}
+
+
+\paragraph{Conditional expressions}
+Suppose we want to format conditional expressions (for example in C)
+like this:
+\begin{quote}
+\syntax{condition}\\
+\mbox{\qquad}$?$ \syntax{expression}\\
+\mbox{\qquad}$:$ \syntax{expression}
+\end{quote}
+The problem is that it's hard to know when the conditional expression
+ends.
+It's essentially a question of precedence, and what we're going to do
+is look ahead until we see an operator with sufficiently low
+precedence that it terminates a conditional expression.
+In SSL a conditional expression can be terminated by a semicolon, a
+right parenthesis, a comma, or a colon.
+We'll use the {\em right context} to do the lookahead.
+{\small
+\begin{verbatim}
+token ? translation <"\\?"> category question
+token : category colon
+
+<indent-force> question math <force> colon --> condbegin
+[ condbegin math <outdent> ] (semi|close|comma|colon) --> math (semi|close|comma|colon)
+\end{verbatim}
+}
+
+\subsection{Debugging a prettyprinting grammar}
+{\tt WEAVE} has two tracing modes that can help you debug a
+prettyprinting grammar.
+The control sequence {\tt @1} turns on partial tracing, and {\tt @2}
+turns on a full trace.  
+{\tt @0} turns tracing back off again.
+In the partial tracing mode, {\tt WEAVE} applies all the productions
+as many times as possible, and then it prints out the irreducible
+scraps that remain.
+If the scraps reduce to a single scrap,  no diagnostics are printed.
+
+
+When a scrap is printed, {\tt WEAVE} prints a leading
+{\tt+}~or~{\tt-}, the name of the category of that scrap, and a
+trailing {\tt+}~or~{\tt-}.
+The {\tt+} indicates that {\TeX} should be in math mode, and the
+{\tt-} that {\TeX} should not be in math mode, at the beginning and
+end of the scrap's translation, respectively.
+(You can see the translations by looking at the {\tt.tex} file, since
+that's where they're written out.)
+
+For beginners, the full trace is more helpful.
+It prints out the following information every time a production is
+fired:
+\begin{itemize}
+\item
+The number of the production just fired (from {\tt productions.list});
+\item
+The sequence of scraps {\tt WEAVE} is now trying to reduce;
+\item
+A {\tt*} indicating what subsequence {\tt WEAVE} will try to reduce
+next.
+\end{itemize}
+A good way to understand how prettyprinting grammars work is to take
+a {\tt productions.list} file, and look at a full trace of the
+corresponding {\tt WEAVE}.
+Or, if you prefer, you can simulate by hand the action of {\tt WEAVE}
+on a sequence of scraps.
+
+\section{The rest of the {Spider} language}
+The tokens and the grammar are not quite the whole story.
+Here's  the rest of the truth about what you can do with {Spider}.
+
+\subsection{Naming the target language}
+When a Spidery {\tt WEAVE} or {\tt TANGLE} starts up, it prints the
+target language for which it was generated, and the date and time of
+the generation.
+The {\tt language} command is used to identify the language being
+targeted.
+Its syntax is
+\begin{quote}
+\tt language \syntax{language-name}
+\opt{extension \syntax{extension-name}}\\
+\mbox{\qquad\qquad}\opt{version \syntax{version-name}}
+\end{quote}
+The extension name is the extension used (in place of {\tt .web}) by
+{\tt TANGLE} to write out the program text for the unnamed module.
+The extension is also used to construct a language-specific file of
+{\TeX} macros to be used by {\tt WEAVE}, so different languages should
+always have different extensions.
+If the extension is  not given it defaults to the language name.
+If the version information is given, it too will be printed out at
+startup.
+
+The {\tt c.spider} file I use for Unix has
+\begin{verbatim}
+language C extension c
+\end{verbatim}
+
+
+\subsection{Defining {\TeX} macros}
+In addition to the ``kernel'' {\WEB} macros stored in {\tt
+webkernel.tex}, you may want to create some {\TeX} macros of your
+own for use in translations.
+Any macro definitions you put between lines saying {\tt macros begin}
+and {\tt macros end} will be included verbatim in the {\TeX} macro
+file for this language.
+That macro  file will automatically be \verb+\input+ by every {\TeX}
+file generated by this {\tt WEAVE}.
+
+For example, the C grammar includes productions to handle preprocessor
+directives.
+These  directives may include file names that are delimited by angle
+brackets.
+I wanted to use the abbreviations \verb+\LN+ and \verb+\RN+ for left
+and right angle brackets, so I included
+\begin{verbatim}
+macros begin
+\let\LN\langle
+\let\RN\rangle
+macros end
+\end{verbatim}
+in the {\tt c.spider} file.
+
+\subsection{Setting default token information}
+It's possible to set default values for the {\tt translation} and {\tt
+mathness} properties of tokens, so that they don't have to be
+repeated.
+This is done with the {\tt default} command, whose syntax is:
+\begin{quote}
+\tt
+default \syntax{token descriptions}
+\end{quote}
+The initial defaults (when {Spider} begins execution) are {\tt
+translation~<*>} and {\tt mathness~maybe}.
+
+\subsection{Specifying the treatment of modules}
+{\WEB} introduces a new kind of token that isn't in any programming
+language, and that's the module name ({\tt @<...@>} or {\tt @(...@>}).
+{\tt TANGLE}'s job is to convert the module names to program text, and
+when {\tt TANGLE} is finished no module names remain.
+But {\tt WEAVE} has to typeset the module names, and we need to tell
+{\tt WEAVE} what category to give a scrap created from a module name.
+We allow two different categories, one for the definition of the
+module name (at the beginning of a module), and one for a use of a
+module name.
+{\samepage
+The syntax of the {\tt module} command is:
+\begin{quote}
+\tt
+module \opt{definition \syntax{category name}} 
+\opt{use \syntax{category name}}
+\end{quote}
+}
+
+The {\tt c.spider} file contains the line
+\begin{verbatim}
+module definition decl use math
+\end{verbatim}
+
+\subsection{Determining the at sign}
+When generating a {\WEB} system with {Spider}, you're not required
+to use ``{\tt @}'' as the ``magic at sign'' that introduces {\WEB}
+control sequences.
+By convention, however, we use ``{\tt @}'' unless that is deemed
+unsuitable.
+If ``{\tt @}'' is unsuitable, we use ``{\tt \#}.''
+Since {Spider} writes C~{\WEB} code for {\tt WEAVE} and {\tt
+TANGLE}, it writes a lot of {\tt @} signs.
+I didn't when to have to escape each one, so I chose
+``{\tt \#}'' for Awk~{\WEB}'s at sign:
+\begin{verbatim}
+at_sign #
+\end{verbatim}
+The at sign defaults to ``{\tt @}'' if left unspecified.
+
+\paragraph{Changing control sequences}
+Changing the at sign changes the meaning of one or two control
+sequences.
+This is more easily illustrated by example than explained.
+Suppose we change the at sign to {\tt\#}.
+Then in the resulting {\WEB} two control sequences have new meanings:
+\begin{description}
+\item[{\tt \#\#}]
+Stands for a {\tt \#} in the input, by analogy with {\tt @@} in normal
+{\WEB}.
+You will need this when defining {\TeX} macros that take parameters.
+\item[{\tt \#@}]
+This is the new name of the control sequence normally represented by
+{\tt@\#}.
+ You would use {\tt\#@} to get a line break followed by vertical
+white space.
+\end{description}
+If you change the at sign to something other than {\tt@}~or~{\tt\#},
+the above will still hold provided you substitute your at sign for
+{\tt\#}.
+
+
+\subsection{Comments in the programming language}
+We have to tell {\tt WEAVE} and {\tt TANGLE} how to recognize
+comments in our target programming language, since comment text is
+treated as {\TeX} text by {\tt WEAVE} and is ignored by {\tt TANGLE}.
+The syntax of the {\tt comment} command is
+\begin{quote}
+\tt
+comment begin \syntax{restricted translation} \\
+\null\qquad end $(\syntax{restricted translation}|{\tt newline})$
+\end{quote}
+The restricted translations can include  only  quoted
+strings, {\tt space}, and 
+{\tt dash}.
+They give the character sequences that begin and end comments.
+If comments end with newlines the correct incantation is {\tt end
+newline}.
+
+If the comment character is the same as the at sign, it has to be
+doubled in the {\WEB} file to have any effect.
+For reasons that I've forgotten, {Spider} is too dumb
+to figure this out and {\em you must double the comment character in
+the {Spider} file}.
+This is not totally unreasonable since any at sign that actually appears in a
+{\WEB}  file will have to be double to be interpreted correctly.
+
+{\tt WEAVE} uses the macros \verb+\commentbegin+ and
+\verb+\commentend+ at the beginning and end of comments, so you can
+define these to be whatever you like (using the {\tt macros} command)
+if you don't like {Spider}'s defaults.
+{Spider} is smart enough to escape {\TeX}'s special characters in
+coming up with these defaults.
+
+Here's a real-world ugly example of how things really are, from the
+{\tt spider} file for Awk:
+\begin{verbatim}
+comment begin <"##"> end newline
+macros begin
+\def\commentbegin{\#} % we don't want \#\#
+macros end
+\end{verbatim}
+
+\subsection{Controlling line numbering}
+ A compiler doesn't get to see  {\WEB} files directly; it has to
+read the output of {\tt TANGLE}.
+Error messages labelled with line numbers from a tangled file aren't
+very helpful, so  Spidery {\tt TANGLE} does something to improve the
+situation: it writes {\tt \#line} directives into its output, in the
+manner of the C~preprocessor.
+({\tt TANGLE} also preserves the line breaking of the {\WEB} source,
+so that the {\tt \#line} information will be useful.)
+For systems like Unix with {\tt cc} and {\tt dbx}, both compile-time
+and run-time debugging can be done in terms of the {\WEB} source, and
+the intermediate programming language source need never be consulted.
+
+Not all compilers support line numbering with {\tt \#line} directives,
+so {Spider} provides a {\tt line} command to change the format of
+the {\tt \#line} directives.
+If your compiler doesn't support {\tt \#line}, you can use the {\tt
+line} command to turn the line number information into a comment.%
+\footnote{%
+There should be a command that turns off line numbering.%
+}
+The syntax is:
+\begin{quote}
+\tt
+line begin \syntax{restricted translation} end \syntax{restricted translation}
+\end{quote}
+The {\tt begin} translation tells what string to put in front of the file
+name and line number information; the {\tt end} translation tells what to
+put afterward.
+The defaults (which are set for C) are
+\begin{verbatim}
+line begin <"#line"> end <"">
+\end{verbatim}
+Here's an example from the Ada~{Spider} file, which makes the line
+number information into an Ada comment:
+\begin{verbatim}
+line begin <"--"-space-"line"> end <"">
+\end{verbatim}
+
+
+
+
+\subsection{Showing the date of generation}
+When Spidery {\tt WEAVE} and {\tt TANGLE} start up, they print the
+date and time at which their {Spider} file was processed.
+This is done through the good offices of {Spider}'s {\tt date}
+command, which is
+\begin{quote}
+\tt
+date \syntax{date}
+\end{quote}
+where \syntax{date} looks like {\tt "Fri Dec 11 11:31:18 EST 1987"} or
+some such.
+Normally you never need to use the {\tt date} command, because one is
+inserted automatically by the {Spider} tools, but if you're
+porting {Spider} to a non-Unix machine you need to know about it.
+
+
+
+
+\section{Spider's error messages}
+{Spider} makes a lot of attempts to detect errors in a 
+{Spider} specification.
+{Spider}'s error messages are intended to be self-explanatory, but
+I don't know how well they succeed.
+In case you run into trouble, here are the error
+conditions {Spider} tries to detect:
+\begin{itemize}
+\item 
+ Garbled commands, lines with bad fields in them, or commands with
+unused fields.
+Any command with a field {Spider} can't follow or with an extra
+field is ignored from the bad field onward, but the earlier fields may
+have an effect.
+Any production with a bad field or other error is dropped completely.
+\item
+Missing {\tt language} command.
+\item
+{\tt macros} or {\tt comment} command before {\tt language} command.
+{Spider}  uses the {\tt extension} information
+from the  {\tt language} command to determine the name of the file to
+which the macros will be written, and  the {\tt comment} command
+causes {Spider} to write macros telling {\TeX} what to do at the
+beginning and end of comments.
+\item
+Contexts don't match on the left and right sides of a production.
+\item
+A numbered target token doesn't fall in the range defined by the
+left hand side of its production.
+\item
+Some category is never {\em appended}.
+This means there is no  way to create a scrap with this category.
+{Spider} only looks to see that each
+category appears at least once as the category of some token or as the
+category of the target token in some production, so {Spider} might
+fail to detect this condition (if there is some production that can
+never fire).
+\item
+Some category is never {\em reduced}.
+This  means that the category never appears in a scrap
+designator from the firing instructions of a production.
+If a category is never reduced, {Spider} only issues a warning,
+and does not halt the compilation process with an error.
+
+The append
+and reduce checks will usually catch you if you misspell a category
+name.
+\item
+You defined more tokens than {\tt WEAVE} and {\tt TANGLE} can handle.
+\item
+You forgot token information for identifiers, numeric
+constants, newlines, pseudo-semicolons~({\tt @;}), module definitions,
+or module uses.
+\item
+Some ilk has no translation, or there is some ilk of which there are
+no reserved words.
+\end{itemize}
+
+
+
+
+\section{{Spider}'s output files}
+{Spider} writes many output files, and you may want to look at
+them to figure out what's going on.
+Here is a partial list (you can find a complete list by consulting
+{\tt spider.web}):
+\begin{description}
+\item[\tt cycle.test]
+Used to try to detect potential loops in the grammar.
+Such loops can cause {\tt WEAVE} to run indefinitely (until it runs
+out of memory) on certain inputs.
+Discussed below with the {Spider} tools.
+\item[\tt spider.slog]
+A verbose discussion of everything {Spider} did while it was
+processing your file.
+To be consulted when things go very wrong.
+\item[\tt *web.tex]
+The macros specific to the generated {\WEB}.
+\item[\tt productions.list]
+A numbered list of all the productions.
+This list is invaluable when you are trying to debug a grammar using
+Spidery {\tt WEAVE}'s tracing facilities ({\tt @2}).
+\end{description}
+
+
+
+
+\section{Using {Spider} to make {\WEB} (the {Spider} tools)}
+Many of the {Spider} tools do error checking, like:
+\begin{itemize}
+\item
+Check to see there are no duplicate names among the categories, ilks,
+and translation keywords.
+\item
+Check the translation keywords against a list of those recognized by
+{\tt WEAVE}, and yelps if trouble happens.
+\item
+Try to determine whether there is a ``production cycle'' that could
+cause {\tt WEAVE} to loop infinitely by firing the productions in the
+cycle one after another.
+\end{itemize}
+
+I'm not going to say much about how to do all this, or how to make
+{\tt WEAVE} and {\tt TANGLE}; instead I'm going to show you a {\tt
+Makefile} and comment on it a little bit.
+Since right now Spidery {\tt WEB} is available only on Unix systems,
+chances are you have the {\tt Makefile} and can just type ``{\tt
+make~tangle}'' or ``{\tt make~weave}.'' 
+If not, reading the Makefile is still your best bet to figure out what
+the tools do.
+
+We assume that you are making {\tt WEAVE} and {\tt TANGLE} in some
+directory, and that the ``master sources'' for Spidery {\WEB} are kept
+in some other directory.
+Some of the  {\tt Makefile} macros deserve special mention:
+\begin{description}
+\renewcommand{\makelabel}[1]{{\tt#1}\hfil}
+\item[THETANGLE]
+Name of the {\tt TANGLE} we will generate.
+\item[THEWEAVE]
+Name of the {\tt WEAVE} we will generate.
+\item[SPIDER]
+Name of the {Spider} input file.
+\item[DEST]
+The directory in which the executables defined by \verb+$(TANGLE)+ and
+\verb+$(WEAVE)+ will be placed.
+\item[WEBROOT]
+The directory that is the root of the Spidery {\WEB} distribution.
+\item[MASTER]
+The location of the ``master sources.''
+This should always be different from the directory in which {\tt make}
+is called, or havoc will result.
+\item[CTANGLE]
+The name of the program used to tangle C code.
+\item[AWKTANGLE]
+The name of the program used to tangle Awk code.
+\item[MACROS]
+The name of a directory in which to put {\TeX} macro definitions (a
+{\tt *web.tex} file.
+\end{description}
+
+Usually we will only be interested in two commands: ``\/{\tt
+make~weave}'' and ``\/{\tt make~tangle}.''
+It's safe to use ``\/{\tt make~clean}'' only if you use the current
+directory for nothing exception spidering; ``\/{\tt make~clean}'' is
+really vicious.
+
+The line that's really of interest is the line showing the dependency
+for {\tt grammar.web}.
+First we run {Spider}.
+Then we check for bad translation keywords and for potential cycles in
+the prettyprinting grammar.
+We check for duplicate names, and then finally (if everything else
+works), we put the {\tt *web.tex} file in the right place.
+
+Here's \verb+$(MASTER)/WebMakefile+:
+\begingroup\small
+\begin{verbatim}
+# Copyright 1989 by Norman Ramsey and Odyssey Research Associates.
+# To be used for research purposes only.
+# For more information, see file COPYRIGHT in the parent directory.
+
+HOME=/u/nr#			# Make no longer inherits environment vars
+THETANGLE=tangle
+THEWEAVE=weave
+SPIDER=any.spider
+#
+DVI=dvi
+CFLAGS=-DDEBUG -g -DSTAT
+
+# CPUTYPE is a grim hack that attempts to solve the problem of multiple
+# cpus sharing a file system.  In my environment I have to have different
+# copies of object and executable for vax, sun3, next, iris, and other 
+# cpu types.  If you will be using Spidery WEB in a homogeneous processor
+# environment, you can just set CPUTYPE to a constant, or eliminate it 
+# entirely.  
+#
+# In my environment, the 'cputype' program returns a string that
+# describes the current processor.  That means that the easiest thing
+# for you to do is to define a 'cputype' program that does something
+# sensible.  A shell script that says 'echo "vax"' is fine.
+
+CPUTYPE=`cputype`
+
+# Change the following three directories to match your installation
+#
+# the odd placement of # is to prevent any trailing spaces from slipping in
+
+WEBROOT=$(HOME)/web/src# 	# root of the WEB source distribution
+DEST=$(HOME)/bin/$(CPUTYPE)#	 	# place where the executables go
+MACROS=$(HOME)/tex/macros# 	# place where the macros go
+
+MASTER=$(WEBROOT)/master# 	# master source directory
+OBDIR=$(MASTER)/$(CPUTYPE)#	# common object files
+
+TANGLESRC=tangle
+CTANGLE=ceetangle -I$(MASTER)
+CWEAVE=ceeweave -I$(MASTER)
+AWKTANGLE=awktangle -I$(MASTER)
+COMMONOBJS=$(OBDIR)/common.o $(OBDIR)/pathopen.o
+COMMONC=$(MASTER)/common.c $(MASTER)/pathopen.c
+COMMONSRC=$(COMMONC) $(MASTER)/spider.awk
+
+
+
+# Our purpose is to make tangle and weave
+
+web: tangle weave
+
+tangle: $(COMMONOBJS) $(TANGLESRC).o
+	cc $(CFLAGS) -o $(DEST)/$(THETANGLE) $(COMMONOBJS) $(TANGLESRC).o
+
+weave: $(COMMONOBJS) weave.o
+	cc $(CFLAGS) -o $(DEST)/$(THEWEAVE) $(COMMONOBJS) weave.o
+
+
+source: $(TANGLESRC).c $(COMMONSRC) # make tangle.c and common src, then clean
+	if [ -f WebMakefile ]; then exit 1; fi  # don't clean the master!
+	if [ -f spiderman.tex ]; then exit 1; fi # don't clean the manual
+	-rm -f tangle.web weave.* common.* # remove links that may be obsolete
+	-rm -f *.unsorted *.list grammar.web outtoks.web scraps.web 
+	-rm -f cycle.test spider.slog
+	-rm -f *.o *.tex *.toc *.dvi *.log *.makelog *~ *.wlog *.printlog
+
+# Here is how we make the common stuff
+
+$(MASTER)/common.c: $(MASTER)/common.web # no change file
+	$(CTANGLE) $(MASTER)/common 
+
+$(OBDIR)/common.o: $(MASTER)/common.c
+	cc $(CFLAGS) -c $(MASTER)/common.c
+	mv common.o $(OBDIR)
+
+
+$(MASTER)/pathopen.c: $(MASTER)/pathopen.web # no change file
+	$(CTANGLE) $(MASTER)/pathopen 
+	mv pathopen.h $(MASTER)
+
+$(OBDIR)/pathopen.o: $(MASTER)/pathopen.c
+	cc $(CFLAGS) -c $(MASTER)/pathopen.c
+	mv pathopen.o $(OBDIR)
+
+
+## Now we make the tangle and weave source locally
+
+$(TANGLESRC).c: $(MASTER)/$(TANGLESRC).web $(MASTER)/common.h grammar.web
+	-/bin/rm -f $(TANGLESRC).web
+	ln $(MASTER)/$(TANGLESRC).web $(TANGLESRC).web
+#	chmod -w $(TANGLESRC).web
+	$(CTANGLE) $(TANGLESRC)
+
+weave.c: $(MASTER)/weave.web $(MASTER)/common.h grammar.web 
+	-/bin/rm -f weave.web
+	ln $(MASTER)/weave.web weave.web
+#	chmod -w weave.web
+	$(CTANGLE) weave 
+
+## Here's where we run SPIDER to create the source
+
+grammar.web: $(MASTER)/cycle.awk $(MASTER)/spider.awk $(SPIDER)
+	echo "date" `date` | cat - $(SPIDER) | awk -f $(MASTER)/spider.awk
+	cat $(MASTER)/transcheck.list trans_keys.unsorted | awk -f $(MASTER)/transcheck.awk
+	awk -f $(MASTER)/cycle.awk < cycle.test
+	sort *.unsorted | awk -f $(MASTER)/nodups.awk
+	mv *web.tex $(MACROS)
+
+## We might have to make spider first.
+
+$(MASTER)/spider.awk: $(MASTER)/spider.web
+	$(AWKTANGLE) $(MASTER)/spider
+	mv cycle.awk nodups.awk transcheck.awk $(MASTER)
+	rm junk.list
+
+
+# $(MASTER)/cycle.awk: $(MASTER)/cycle.web # making spider also makes cycle
+# 	$(AWKTANGLE) $(MASTER)/cycle
+
+
+# This cleanup applies to every language
+
+clean:
+	if [ -f WebMakefile ]; then exit 1; fi # don't clean the master!
+	if [ -f spiderman.tex ]; then exit 1; fi # don't clean the manual
+	-rm -f tangle.* weave.* common.* # remove links that may be obsolete
+	-rm -f *.unsorted *.list grammar.web outtoks.web scraps.web 
+	-rm -f cycle.test spider.slog
+	-rm -f *.c *.o *.tex *.toc *.dvi *.log *.makelog *~ *.wlog *.printlog
+
+
+
+# booting the new distribution
+boot:
+	cd ../master; rm -f *.o; for i in $(COMMONC); do \
+		cc $(CFLAGS) -c $$i; \
+		mv *.o $(OBDIR) ; \
+	done; cd ../c
+	cc $(CFLAGS) -c $(TANGLESRC).c; \
+	cc $(CFLAGS) -o $(DEST)/$(THETANGLE) $(COMMONOBJS) $(TANGLESRC).o
+
+ 
+\end{verbatim}
+\endgroup
+
+\section{Getting your own  Spidery {\tt WEB}}
+At this time, Spidery {\tt WEB} has been tested only on Unix machines.
+It should be easy to port to any machine having a C compiler and an
+Awk interpreter, but undoubtedly some changes will be necessary.
+The full {Spider} distribution, including this manual, is available by
+anonymous {\tt ftp} from {\tt princeton.edu:~ftp/pub/spiderweb.tar.Z}.
+You should pick a directory to install {Spider} in, untar the
+distribution, and follow the directions in the README file.
+The directory you have picked becomes {\tt WEBROOT}.
+
+If the {\tt Makefile} in the distribution differs from the one given
+above, the one in the distribution should be considered the correct
+one. 
+
+
+
+
+\section{A real {Spider} file}
+I have tried to use real examples to illustrate the use of {Spider}.
+I include here, as an extended example, the complete {Spider} file for
+the Awk language. 
+Those who cannot easily study the distribution may find it useful to
+study this.
+\begingroup\small
+\begin{verbatim}
+# Copyright 1989 by Norman Ramsey and Odyssey Research Associates.
+# To be used for research purposes only.
+# For more information, see file COPYRIGHT in the parent directory.
+
+language AWK extension awk
+
+at_sign #
+
+module definition stmt use stmt
+# use as stmt is unavoidable since tangle introduces line breaks
+
+comment begin <"##"> end newline
+macros begin
+\def\commentbegin{\#} % we don't want \#\#
+macros end
+
+line begin <"#line"> end <"">
+
+default translation <*> mathness yes
+
+token identifier category math mathness yes
+token number category math mathness yes
+token newline category newline translation <> mathness maybe
+token pseudo_semi category ignore_scrap mathness no translation <opt-0>
+
+token \ category backslash translation <> mathness maybe
+token + category unorbinop
+token - category unorbinop
+token * category binop
+token / category binop
+token < category binop
+token > category binop
+token >> category binop translation <"\\GG">
+token = category equals translation <"\\K">
+token ~ category binop translation <"\\TI">
+token !~ category binop translation <"\\not\\TI">
+token & category binop translation <"\\amp">
+token % translation <"\\%"> category binop
+token ( category open
+token [ category lsquare
+token ) category close
+token ] category close
+token { translation <"\\;\\{"-indent> category lbrace
+token } translation <"\\}\\"-space> category close
+token , category binop translation <",\\,"-opt-3>
+
+token ; category semi translation <";"-space-opt-2> mathness no
+# stuff with semi can be empty in for statements
+open semi --> open
+semi semi --> semi
+semi close --> close
+semi --> binop
+
+# token : category colon
+# token | category bar
+token != name not_eq translation <"\\I"> category binop
+token <= name lt_eq translation <"\\L"> category binop
+token >= name gt_eq translation <"\\G"> category binop
+token == name eq_eq translation <"\\S"> category binop
+token && name and_and translation <"\\W"> category binop
+token || name or_or translation <"\\V"> category binop
+# token -> name minus_gt translation <"\\MG"> category binop
+token ++ name gt_gt category unop translation <"\\uparrow">
+token -- name lt_lt category unop translation <"\\downarrow">
+# preunop is for unary operators that are prefix only
+token $ category preunop translation <"\\DO"> mathness yes
+
+default mathness yes translation <*>
+
+ilk pattern_like category math
+reserved BEGIN ilk pattern_like
+reserved END ilk pattern_like
+
+ilk if_like category if
+reserved if
+ilk else_like category else
+reserved else
+
+ilk print_like category math
+# math forces space between this and other math...
+reserved print ilk print_like
+reserved printf ilk print_like
+reserved sprintf ilk print_like
+
+
+ilk functions category unop mathness yes
+reserved length ilk functions
+reserved substr ilk functions
+reserved index ilk functions
+reserved split ilk functions
+reserved sqrt ilk functions
+reserved log  ilk functions
+reserved exp ilk functions
+reserved int ilk functions
+
+ilk variables category math mathness yes
+reserved NR ilk variables
+reserved NF ilk variables
+reserved FS ilk variables
+reserved RS ilk variables
+reserved OFS ilk variables
+reserved ORS ilk variables
+
+ilk for_like category for
+reserved for ilk for_like
+reserved while ilk for_like
+
+ilk in_like category binop translation <math_bin-*-"}"> mathness yes
+# translation <"\\"-space-*-"\\"-space>
+reserved in ilk in_like
+
+ilk stmt_like category math
+reserved break ilk stmt_like
+reserved continue ilk stmt_like
+reserved next ilk stmt_like
+reserved exit ilk stmt_like
+
+
+backslash newline --> math
+# The following line must be changed to make a backslash
+backslash <"\\backslash"> --> math
+
+math (binop|unorbinop) math --> math
+<"\\buildrel"> (binop|unorbinop) <"\\over{"> equals <"}"> --> binop
+equals --> binop
+(unop|preunop|unorbinop) math --> math
+# unorbinop can only act like unary op as *prefix*, not postfix
+math unop --> math
+math <"\\"-space> math --> math
+# concatenation
+
+math newline --> stmt
+newline --> ignore_scrap
+
+stmt <force> stmt --> stmt
+
+(open|lsquare) math close --> math
+
+math lbrace --> lbrace
+lbrace <force> stmt --> lbrace
+lbrace <outdent-force> close --> stmt
+
+if <"\\"-space> math --> ifmath
+ifmath lbrace --> ifbrace
+ifmath newline --> ifline
+ifbrace <force> stmt --> ifbrace
+ifbrace <outdent-force> close else <"\\"-space> if --> if
+ifbrace <outdent-force> close else lbrace --> ifbrace
+ifbrace <outdent-force> close else newline --> ifline
+ifbrace <outdent-force> close --> stmt
+(ifline|ifmath) <indent-force> stmt <outdent-force> else <"\\"-space> if --> if
+(ifline|ifmath) <indent-force> stmt <outdent-force> else lbrace --> ifbrace
+(ifline|ifmath) <indent-force> stmt <outdent-force> else newline --> ifline
+(ifline|ifmath) <indent-force> stmt <outdent-force> else --> ifmath
+(ifline|ifmath) <indent-force> stmt <outdent> --> stmt
+
+for <"\\"-space> math --> formath
+formath lbrace --> forbrace
+formath newline --> forline
+forbrace <force> stmt --> forbrace
+forbrace <outdent-force> close --> stmt
+(forline|formath) <indent-force> stmt <outdent> --> stmt
+
+
+? ignore_scrap --> #1
+\end{verbatim}
+\endgroup
+
+
+
+\section{Bibliography}
+\begin{thebibliography}{Knuth~999}
+\bibitem[Bentley~87]{bentley:pearls}
+Jon L. Bentley, ``Programming Pearls,'' {\sl Communications of the
+ACM}~{\bf 29:5}(May 1986), 364--?, and {\bf 29:6}(June 1986),
+471--483.
+Two columns on literate programming.
+The first is an introduction, and the second is an extended example by
+Donald Knuth, with commentary by Douglas MacIlroy.
+\bibitem[Knuth~83]{knuth:web}
+Donald~E. Knuth,
+``The {{\tt WEB}} system of structured documentation''
+ Technical Report 980, Stanford Computer Science, Stanford,
+  California, September 1983.
+The manual for the original {\tt WEB}.
+\bibitem[Knuth~84]{knuth:literate-programming}
+Donald E. Knuth, ``Literate Programming,'' {\sl The Computer Journal}
+{\bf 27:2}(1984), 97--111.
+The original introduction to literate programming with {\WEB}.
+\bibitem[Levy~87]{levy:cweb}
+Silvio Levy, ``Web Adapted to C, Another Approach'' {\sl TUGBoat}
+{\bf 8:2}(1987), 12--13.
+A short note about the C implementation of {\WEB}, from which Spidery
+{\WEB} is descended.
+\bibitem[Sewell~89]{sewell:weaving}
+Wayne Sewell, ``Weaving a program: Literate programming in {\tt
+WEB},''
+Van Nostrand Reinhold, 1989.
+\end{thebibliography}
+
+
+\end{document}

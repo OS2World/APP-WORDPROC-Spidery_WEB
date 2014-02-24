@@ -1,0 +1,418 @@
+# Copyright 1989 by Norman Ramsey, Odyssey Research Associates
+# To be used for research purposes only
+# For more information, see file COPYRIGHT in the parent directory
+language Ada extension ada
+
+at_sign @
+
+module definition stmt use math
+
+comment begin <dash-dash-space> end newline
+macros begin
+\def\commentbegin{{\tt -- }}
+macros end
+
+line begin <dash-dash-"line"> end <"">
+
+default translation <*> mathness yes
+
+token identifier category math mathness maybe
+token number category math mathness yes
+token newline category nl translation <> mathness maybe 
+# newline mathness must be no to work with busted_comment
+token pseudo_semi translation <> category semi mathness maybe
+
+macros begin
+\let\R\relax
+macros end
+
+# Delimiters
+token & category binop translation <"\\amp">
+token ( category open 
+token ) category close 
+token * category binop
+token + category unorbinop
+token , category binop translation <",\\,"-opt-3>
+token - category unorbinop
+token . category binop
+token / category binop
+token : category binop 
+token ; category semi translation <";"-space-opt-2> 
+token < category binop
+token = category binop
+token > category binop
+token | category binop translation <"\\mid"> 
+
+# Compound delimiters
+
+token => category arrow translation <"\\AR">
+token .. category binop translation <"\\.{..}">
+token ** category binop 
+token := category binop translation <"\\mathbin{:=}">
+token /= translation <"\\I"> category binop 
+token >= translation <"\\G"> category binop 
+token <= translation <"\\L"> category binop 
+token << translation <"\\LL"> category openlabel 
+token >> translation <"\\GG"> category closelabel 
+token <> translation <"\\LG"> category math
+
+# Hacks no ', and this becomes a binary op
+token ' category binop mathness no 
+
+token # category math translation <"\\#"> 
+token -- category busted_comment mathness no translation <"\\C{">
+
+
+
+
+default mathness maybe translation <*>
+
+reserved abort ilk math_like
+reserved abs ilk unop_like
+reserved accept ilk proc_like
+reserved access ilk math_like
+reserved all ilk math_like
+reserved and ilk and_like
+reserved array ilk math_like
+reserved at ilk at_like
+reserved begin ilk begin_like
+reserved body ilk math_like
+reserved case ilk case_like
+reserved constant ilk math_like
+reserved declare ilk decl_like
+reserved delay ilk math_like
+reserved delta ilk math_like
+reserved digits ilk math_like
+reserved do ilk is_like
+reserved else ilk else_like
+reserved elsif ilk elsif_like
+reserved end ilk end_like
+reserved entry ilk proc_like
+reserved exception ilk ex_like
+reserved exit ilk math_like
+reserved for ilk math_like
+reserved function ilk proc_like
+reserved generic ilk gen_like
+reserved goto ilk math_like
+reserved if ilk if_like
+reserved in ilk unorbinop_like
+reserved is ilk is_like 
+reserved limited ilk math_like
+reserved loop ilk loop_like
+reserved mod ilk binop_like
+reserved new ilk separate_like
+reserved not ilk unop_like
+reserved null ilk math_like
+reserved of ilk math_like
+reserved or ilk or_like
+reserved others ilk math_like
+reserved out ilk math_like
+reserved package ilk proc_like
+reserved pragma ilk math_like
+reserved private ilk private_like
+reserved procedure ilk proc_like
+reserved raise ilk math_like
+reserved range ilk math_like
+reserved record ilk record_like
+reserved rem ilk binop_like
+reserved renames ilk math_like
+reserved return ilk math_like
+reserved reverse ilk math_like
+reserved select ilk begin_like
+reserved separate ilk separate_like
+reserved subtype ilk math_like
+reserved task ilk proc_like
+reserved terminate ilk math_like
+reserved then ilk then_like
+reserved type ilk math_like
+reserved use ilk math_like
+reserved when ilk when_like
+reserved while ilk math_like
+reserved with ilk with_like
+reserved xor ilk binop_like
+
+ilk and_like translation <*> category and
+ilk at_like translation <*> category at
+ilk begin_like translation <*-indent> category beginning
+ilk binop_like translation <"\\"-space-*-"\\"-space> category binop
+ilk case_like translation <*> category case
+ilk decl_like translation <*-indent> category declaration
+ilk else_like translation <*> category else
+ilk elsif_like translation <*> category elsif
+ilk end_like translation <*> category close
+ilk ex_like translation <*> category exception
+ilk gen_like translation <*-indent> category generic
+ilk if_like translation <*> category if
+ilk is_like translation <*> category is mathness no
+ilk loop_like translation <*> category loop
+ilk math_like translation <*> category math
+ilk or_like translation <*> category or
+ilk private_like translation <*> category private
+ilk proc_like translation <*> category proc
+ilk record_like translation <*> category record
+ilk separate_like translation <*> category separate
+ilk then_like translation <*> category then
+ilk unop_like translation <*-"\\"-space> category unop
+ilk unorbinop_like translation <"\\"-space-*-"\\"-space> category resunorbinop
+ilk when_like translation <*> category when
+ilk where_like category where
+ilk with_like translation <*> category with
+
+
+# \MC means ``math close'' and sets \MS to ``math set''
+macros begin
+\def\MC{\ifmmode\global\let\MS$\else\global\let\MS\relax\fi\relax\MS}
+\def\LG{\mathord{<}\mathord{>}}
+\let\IG=\ignorespaces
+macros end
+
+
+
+busted_comment <"\\MC}\\MS\\R"-force> nl --> ignore_scrap
+busted_comment ? --> busted_comment
+
+beginning <outdent-force> continuation <outdent-force> ending --> stmt
+beginning <outdent-force> ending --> stmt
+beginning <force> (stmt|ignore_scrap) --> beginning
+
+case <"\\"-space> math <"\\"-space> is <indent-force> --> beginning
+
+close semi --> ending
+close <"\\"-space> ? semi --> ending
+close <"\\"-space> ? <"\\"-space> ? semi --> ending
+
+continuation <force> (stmt|ignore_scrap) --> continuation
+continuation <outdent-force> continuation --> continuation
+
+
+declaration <outdent-force> beginning <outdent-force> continuation <outdent-force> ending --> stmt
+declaration <outdent-force> beginning <outdent-force> ending --> stmt
+declaration <outdent-force> ending --> stmt
+declaration <force> (stmt|ignore_scrap) --> declaration
+
+else <indent-force> --> continuation
+elsif <"\\"-space> math <"\\"-space> then <indent-force> --> continuation
+
+exception <indent-force> --> continuation
+
+generic <outdent-force> declaration --> declaration
+generic <force> (stmt|ignore_scrap) --> generic
+
+if <"\\"-space> math <"\\"-space> then --> ifthen
+ifthen <indent-force> stmt --> beginning
+ifthen <indent-force> <"\\"-space> math <"\\"-space> <outdent-force> else --> ifthen
+ifthen <indent-force> <"\\"-space> math <"\\"-space> <outdent-force> close <"\\"-space> if --> math
+ifthen <indent-force> <"\\"-space> math <"\\"-space> <outdent-force> elsif --> if
+
+
+is --> math
+
+loop <indent-force> --> beginning
+
+math [ <"\\"-space> and <"\\"-space> then <"\\"-space> ] --> math binop
+math [ <"\\"-space> and <"\\"-space> ] --> math binop
+
+math (binop|unorbinop) math --> math
+math <"\\"-space> resunorbinop <"\\"-space>  math --> math
+(unorbinop|unop) math --> math
+resunorbinop <"\\"-space>  math --> math
+# This doesn't apply in Ada:  math unop --> math
+
+math arrow --> math
+math binop <"\\"-space> exception --> math
+math <space> is --> math
+math <"\\"-space> loop --> loop
+math <"\\"-space> math --> math
+math [ <"\\"-space> or <"\\"-space> else <"\\"-space> ] --> math binop
+math [ <"\\"-space> or <"\\"-space> ] --> math binop
+math <"\\"-space> private --> math
+math <"\\"-space> separate --> math
+math <indent-force> stmt <outdent-force> --> stmt
+math terminator --> stmt
+
+open close --> math
+open math close --> math
+open [ math semi ] --> open math
+
+<force-backup> openlabel math closelabel <force> --> math
+
+or <indent-force> --> continuation
+
+private <indent-force> --> beginning
+
+proc <"\\"-space> math <space> is <"\\"-space> separate --> math
+proc <"\\"-space> math <space> is <indent-force> --> declaration
+proc <"\\"-space> math terminator --> stmt
+
+record <"\\"-space> at <"\\"-space> math terminator <indent-force> --> beginning
+record <indent-force> --> beginning
+
+semi --> terminator
+
+stmt <force> stmt --> stmt
+
+when <"\\"-space> math arrow <indent-force> --> whengroup
+[ when <"\\"-space> math ] terminator --> math terminator
+whengroup stmt <outdent-force> ending --> ending
+whengroup stmt <outdent-force> whengroup --> whengroup
+
+where <indent> --> beginning
+
+with <"\\"-space> math --> math
+with <"\\"-space> proc <"\\"-space> math --> math
+
+? ignore_scrap --> #1
+
+
+########################### Additional stuff for PolyAnna ##################
+
+# PolyAnna delimiters
+
+default mathness yes
+
+token --: category virtual translation <"\\R\\IG"> mathness no
+token --| category annotation translation <"\\R\\IG"> mathness no
+token <=> category arrow translation <"\\DA">
+token -> category binop translation <"\\RA">
+
+# We might use these guys for PolyAnna
+
+# token [ category open 
+# token ] category close 
+# token { translation <"\\{"> category open 
+# token } translation <"\\}"> category close 
+
+
+
+# Polyanna reserved words
+
+default mathness maybe translation <*>
+
+reserved based ilk math_like
+reserved bound ilk math_like
+reserved exists ilk math_like
+reserved forall ilk math_like
+reserved global ilk math_like
+reserved mathforall ilk forall_like
+reserved on ilk math_like
+reserved such ilk math_like
+reserved that ilk math_like
+reserved trait ilk math_like
+reserved virtual ilk separate_like
+reserved where ilk where_like
+
+ilk forall_like translation <"\\forall"> category math mathness yes
+
+
+
+# The line below will cause scan_annotations.awk to generate code for
+# scanning annotations and virtual text. The integer is the depth of nesting.
+# (sp is short for "suspend parse", and is created when annotations are
+# encountered in the midst of virtual text.
+#scan_annotations 10
+
+# automatically generating productions...
+
+
+# "annotation" expansion sequence
+
+annotation [ !(nl|sp) nl annotation ] --> annotation #2
+annotation !(nl|sp) [ !(nl|sp) nl annotation ] --> annotation !(nl|sp) #3
+annotation !(nl|sp) !(nl|sp) [ !(nl|sp) nl annotation ] --> annotation !(nl|sp) !(nl|sp) #4
+annotation !(nl|sp) !(nl|sp) !(nl|sp) [ !(nl|sp) nl annotation ] --> annotation !(nl|sp) !(nl|sp) !(nl|sp) #5
+annotation !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) [ !(nl|sp) nl annotation ] --> annotation !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) #6
+annotation !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) [ !(nl|sp) nl annotation ] --> annotation !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) #7
+annotation !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) [ !(nl|sp) nl annotation ] --> annotation !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) #8
+annotation !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) [ !(nl|sp) nl annotation ] --> annotation !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) #9
+annotation !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) [ !(nl|sp) nl annotation ] --> annotation !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) #10
+
+# "virtual" expansion sequence
+
+virtual [ !(nl|sp) nl virtual ] --> virtual #2
+virtual !(nl|sp) [ !(nl|sp) nl virtual ] --> virtual !(nl|sp) #3
+virtual !(nl|sp) !(nl|sp) [ !(nl|sp) nl virtual ] --> virtual !(nl|sp) !(nl|sp) #4
+virtual !(nl|sp) !(nl|sp) !(nl|sp) [ !(nl|sp) nl virtual ] --> virtual !(nl|sp) !(nl|sp) !(nl|sp) #5
+virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) [ !(nl|sp) nl virtual ] --> virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) #6
+virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) [ !(nl|sp) nl virtual ] --> virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) #7
+virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) [ !(nl|sp) nl virtual ] --> virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) #8
+virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) [ !(nl|sp) nl virtual ] --> virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) #9
+virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) [ !(nl|sp) nl virtual ] --> virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) #10
+
+# "virtual" -- "annotation" expansion sequence
+
+virtual !(nl|sp) [ nl ] annotation --> virtual !(nl|sp) sp annotation
+virtual !(nl|sp) !(nl|sp) [ nl ] annotation --> virtual !(nl|sp) !(nl|sp) sp annotation
+virtual !(nl|sp) !(nl|sp) !(nl|sp) [ nl ] annotation --> virtual !(nl|sp) !(nl|sp) !(nl|sp) sp annotation
+virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) [ nl ] annotation --> virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) sp annotation
+virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) [ nl ] annotation --> virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) sp annotation
+virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) [ nl ] annotation --> virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) sp annotation
+virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) [ nl ] annotation --> virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) sp annotation
+virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) [ nl ] annotation --> virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) sp annotation
+virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) [ nl ] annotation --> virtual !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) !(nl|sp) sp annotation
+
+
+# end of automatically generated productions
+
+
+# recognize the end of a group of annotations
+[ <"\\AN{"> annotation !(nl|sp) nl <"\\MC}\\MS\\R"> ] !annotation --> annotation_group !annotation
+
+# recognize the end of some lines of virtual text
+[ <"\\VI{"> virtual !(nl|sp) nl <"\\MC}\\MS\\R"> ] !(virtual|annotation) --> virtual_group !(virtual|annotation)
+
+# ignore a group of annotations in the midst of virtual text
+<"\\MC}\\MS\\R"> sp <force> annotation_group <force-"\\VI{"> virtual --> ignore_scrap
+# if a virtual text terminates with a group of annotations, just turn the
+# suspended parse into a newline---this terminates the virtual text.
+[ sp ] annotation_group !virtual --> nl annotation_group !virtual
+
+
+# put annotations or virtual text in a block by itself, and ignore it
+# in other parsing.
+<force> (annotation_group|virtual_group) <force> --> ignore_scrap
+
+# ignore newlines except in the special situations listed above
+!(annotation|virtual|sp|busted_comment) nl --> #1
+
+
+
+
+
+
+
+macros begin
+\def\AN{\markpar{--|}}
+\def\VI{\markpar{\frenchspacing--:}}
+\let\AR=\Longrightarrow
+\let\RA=\rightarrow
+\let\DA=\Longleftrightarrow
+\let\AS\K
+\def\MG{\mathrel{\to}}
+
+\newbox\window
+\newbox\icon
+\newif\ifmarkdo
+\newdimen\markh\markh=.83333333\baselineskip
+\newdimen\saveindent
+\newcount\saveind
+
+\def\markpar#1#2{\setbox\icon=\hbox{\.{#1 }}%
+\saveindent=\hangindent
+\saveind=\ind
+\setbox\window=\vbox{\advance\hsize by -\wd\icon
+\advance\hsize by -\saveindent
+\global\ind=2\hangindent=\ind em
+\hbox{This line will get peeled}
+\noindent\kern\ind em\copy\bakk\ignorespaces#2}%
+\hangindent=\saveindent
+\global\ind=\saveind
+\vbox{
+\splittopskip=\markh\vbadness=10000\setbox0=\vsplit\window to\markh
+\loop \ifvoid\window\markdofalse\else\markdotrue\fi
+\ifmarkdo
+\hbox{\unhcopy\icon\vsplit\window to\markh}
+\repeat
+}}
+
+\input frames
+macros end

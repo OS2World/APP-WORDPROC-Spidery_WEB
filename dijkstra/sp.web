@@ -1,0 +1,28 @@
+@*Dijkstra's shortest path.
+Obviously the way to prove Dijkstra's algorithm is the way Dijsktra
+would do it himself.
+Consider
+@u
+@<Set |d[u]| to all $\infty$ for all |u| in |V| @>@;
+d[v] := 0;
+W := {v};
+@<For each |u| in |V-W| and $(v,u) \in E$ 
+	let |d[u]| be the weight of $(v,u)$@>@;
+{@tinvariant: $\forall u \in W$, 
+  $d[u]$ is the shortest distance from $v$ to $u$@> &
+  @t$\forall u \in V-W$, $d[u] }
+do |W| != |V| -->
+   @<Let |u| be a vertex in |V-W| with |d[u]| as small as possible@>@;
+   @<For each |w| in |V-W| and $(u,w) \in E$@>@;
+      if d[w] <= d[u] + c(u,w) --> skip
+	[] d [w] >= d[u] + c(u,w) --> d[w] := d[u] + c(u,w)
+      fi;
+   W := W @t$\cup$@> {u}
+od
+
+@*Index.
+
+
+   
+
+

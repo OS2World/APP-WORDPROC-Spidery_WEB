@@ -1,0 +1,86 @@
+Until recently, the only WEB implementations I have been aware of have
+been Knuth's original Pascal implementation, and some ports to C and
+Modula-2.  I have developed a new tool, Spider, which reads a
+description of a programming language and writes a WEB system that can
+be used to write programs in that language.  My colleagues and I have
+used Spider to build WEB systems for Ada, C, AWK, and other languages.
+I am now making a beta test version of Spider available for anonymous
+ftp.  A description follows.
+
+
+Spider reads a description of a programming language, and writes
+source code for a Weave and Tangle which support that language.  The
+language-dependent parts are derived from the description given
+Spider, and the language-independent parts are taken from ``master
+copies'' of Weave and Tangle.  The master copies are derived from
+Silvio Levy's CWEB, and the Tangle and Weave that are constructed are
+implemented in C.  Spider is implemented as an Awk program.
+
+An exhaustive list of Spidery Web's features would interest only Web
+experts, but I do want to mention some features that I hope will
+encourage people to use Spidery {\tt WEB}.
+
+	Tangle and Weave can read from multiple files (this feature is 
+	present in Levy's CWEB), and Tangle can write to multiple files.
+	Included files will be searched for on a path if not found in the
+	current directory.  These features make Spidery WEB more
+	usable on systems that have make.
+
+	TANGLE can expand macros with multiple parameters.
+
+	TANGLE writes #line directives, so you can debug at the	WEB
+	source level if your compiler respects the C~conventions for #line.
+
+
+Many features of WEB seem to exist only to compensate for deficiencies
+in PASCAL, and most of those were dropped in CWEB.  I have changed
+much of CWEB in order to avoid being bound too much by C conventions.
+As a result, there are dozens of minor differences between Spidery WEB
+and original WEB.  To give just one example, Spidery WEB supports
+octal and hexadecimal constants using WEB-style notation, not the C
+notation used in CWEB.
+
+Spider can generate WEB systems for a variety of languages.  The
+author has written Spider description files for C, AWK, Ada, SSL (a
+language that describes attribute grammars to the Cornell Synthesizer
+Generator), the Larch Shared Language (a language for describing
+equational theories), and Dijkstra's language of guarded commands.
+Debugging the grammar that WEAVE uses to prettyprint the language is
+the most time-consuming part of creating a WEB system for a new target
+language, and Spider makes it trivial to change that grammar.  To make
+a Spider description file for an Algol-like language that uses infix
+expression notation, an experienced systems programmer should be able
+to adapt an existing Spider description file very quickly.
+
+Spider's major limitations are lexical.  All Spidery WEBs assume that
+spaces and tabs in the input are not significant, except as
+separators; this makes it impossible to construct Spidery WEBs for
+languages like Fortran and Miranda, where the position of text on a
+line is significant.  (You would have to modify the ``master copies''
+of Tangle and Weave to change the lexical analyzer.)  The lexical
+structures of identifiers, string literals, and numeric literals are
+fixed.
+
+Spider's major value is that is makes it possible to create a new WEB
+quickly, and to tinker with it easily.  My colleagues and I have used
+Spidery WEB to write programs in Ada, C, and SSL, and has been pleased
+with the result.  We have written in WEB an application of 24 thousand
+lines, and we are very pleased at how easy it has been to review and
+maintain this code.  I hope that the availability of Spidery WEB will
+encourage other groups to try literate programming, and that they,
+too, will be pleased with the results.
+
+
+Spidery Web is available by anonymous ftp from princeton.edu, in file
+	~ftp/pub/spiderweb.tar.Z 
+in compressed tar format.  I have tested this system only under Unix.
+While there is no reason to believe it won't work on other systems, it
+does require a C compiler and an Awk filter.  I would like to here
+about experience with other systems, especially MS-DOS.  There is a
+good public-domain awk (AWK210.ARC) available by anonymous ftp from
+grape.ecs.clarkson.edu, but my PC doesn't have enough processing power
+to make it worth the attempt.
+
+Send comments or bug reports to nr@princeton.edu.
+
+Norman Ramsey

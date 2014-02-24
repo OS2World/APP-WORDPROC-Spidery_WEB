@@ -1,0 +1,1800 @@
+% Copyright 1989 by Norman Ramsey, Odyssey Research Associates
+% To be used for research purposes only
+% For more information, see file COPYRIGHT in the parent directory
+
+% This file is part of Spidery WEB
+
+% This program by Norman Ramsey is based on programs Silvio Levy
+% and D. E. Knuth.  Silvio Levy wrote most of the code.
+% It is distributed WITHOUT ANY WARRANTY, express or implied.
+% Dec 1987
+
+% Here is TeX material that gets inserted after \input webmac
+
+\message{OK, entering \string\batchmode...}
+\batchmode
+
+\def\hang{\hangindent 3em\indent\ignorespaces}
+\font\ninerm=cmr9
+\let\mc=\ninerm % medium caps
+\def\cee{C}
+\def\pb{$\.|\ldots\.|$} % C brackets (|...|)
+\def\v{\char'174} % vertical (|) in typewriter font
+\def\ceeref{{\it The C Reference Manual}}
+\mathchardef\RA="3221 % right arrow
+\mathchardef\BA="3224 % double arrow
+
+\def\title{Spidery TANGLE}
+\def\contentspagenumber{1} % should be odd
+\def\topofcontents{\null\vfill
+  \titlefalse % include headline on the contents page
+  \def\rheader{\hfil}
+  \centerline{\titlefont The {\ttitlefont Spidery TANGLE} processor}
+  \vfill
+}
+
+@* Introduction.
+\.{TANGLE} has a fairly straightforward outline.  It operates in
+two phases: first it reads the source file, saving the \cee\ code in
+compressed form; then outputs the code, after shuffling it around.
+It can be compiled
+with certain optional flags, |DEBUG| and |STAT|, the latter being used
+to keep track of how much of \.{TANGLE}'s resources were actually used.
+
+@u
+@<Include files@>@;
+@<Common code for \.{WEAVE} and \.{TANGLE}@>@;
+@<Typedef declarations@>@;
+@<Global variables@>@;
+
+main (ac, av)
+char **av;
+{
+  argc=ac; argv=av;
+  program=tangle;
+  @<Set initial values@>;
+  common_init();
+  printf(banner); /* print a ``banner line'' */
+  phase_one(); /* read all the user's text and compress it into |tok_mem| */
+  phase_two(); /* output the contents of the compressed tables */
+  wrap_up();
+}
+
+@ The following parameters were sufficient in the original \.{TANGLE} to
+handle \TeX, so they should be sufficient for most applications of \.{TANGLE}.
+
+If you change |max_bytes|, |max_names| or |hash_size| you should also
+change them in the file |"common.web"|.
+
+@d max_bytes = 90000 /* the number of bytes in identifiers,
+  index entries, and module names; used in |"common.web"| */
+@d max_toks = 150000 /* number of bytes in compressed \cee\ code */
+@d max_names = 4000 /* number of identifiers, strings, module names;
+  must be less than 10240; used in |"common.web"| */
+@d max_texts = 2000 /* number of replacement texts, must be less than 10240 */
+@d hash_size = 353 /* should be prime; used in |"common.web"| */
+@d longest_name = 400 /* module names shouldn't be longer than this */
+@d stack_size = 50 /* number of simultaneous levels of macro expansion */
+@d buf_size = 100 /* for \.{WEAVE} and \.{TANGLE} */
+
+@i common.h
+
+@ Should include tlang.web but can't because AWK runs out of files.
+
+@* Data structures exclusive to {\tt TANGLE}.
+We've already seen that the |byte_mem| array holds the names of identifiers,
+strings, and modules;
+the |tok_mem| array holds the replacement texts
+for modules. Allocation is sequential, since things are deleted only
+during Phase II, and only in a last-in-first-out manner.
+
+A \&{text} variable is a structure containing a pointer into
+|tok_mem|, which tells where the corresponding text starts, and an
+integer |text_link|, which, as we shall see later, is used to connect
+pieces of text that have the same name.  All the \&{text}s are stored in
+the array |text_info|, and we use a |text_pointer| variable to refer
+to them.
+
+The first position of |tok_mem| that is unoccupied by
+replacement text is called |tok_ptr|, and the first unused location of
+|text_info| is called |text_ptr|.  Thus we usually have the identity
+|text_ptr->tok_start=tok_ptr|.
+
+If your machine does not support |char unsigned| you should change
+the definition of \&{eight\_bits} to |short unsigned|.
+@^system dependencies@>
+
+@<Typed...@>=
+typedef struct {
+  eight_bits *tok_start; /* pointer into |tok_mem| */
+  sixteen_bits text_link; /* relates replacement texts */
+} text;
+typedef text *text_pointer;
+
+@ @<Glob...@>=
+text text_info[max_texts];
+text_pointer text_info_end=text_info+max_texts-1;
+text_pointer text_ptr; /* first unused position in |text_info| */
+eight_bits tok_mem[max_toks];
+eight_bits *tok_mem_end=tok_mem+max_toks-1;
+eight_bits *tok_ptr; /* first unused position in |tok_mem| */
+
+@ @<Set init...@>=
+text_info->tok_start=tok_ptr=tok_mem;
+text_ptr=text_info+1; text_ptr->tok_start=tok_mem;
+  /* this makes replacement text 0 of length zero */
+
+@ If |p| is a pointer to a module name, |p->equiv| is a pointer to its
+replacement text, an element of the array |text_info|.
+
+@d equiv = equiv_or_xref /* info corresponding to names */
+
+@ @<Set init...@>=
+name_dir->equiv=(ASCII *)text_info; /* the undefined module has no replacement text */
+
+@ Here's the procedure that decides whether a name of length |l|
+starting at position |first| equals the identifier pointed to by |p|:
+
+@u
+names_match(p,first,l)
+name_pointer p; /* points to the proposed match */
+ASCII *first; /* position of first character of string */
+int l; /* length of identifier */
+{
+  if (length(p)!=l) return 0;
+  return !strncmp(first,p->byte_start,l);
+}
+
+@ 
+@u
+init_node(node)
+name_pointer node;
+{
+    node->equiv=(ASCII *)text_info;
+
+}
+init_p(p,t)
+name_pointer p;
+eight_bits t;
+{
+  p->ilk=t;
+}
+
+
+
+@*Tokens.
+ Replacement
+ texts, which represent \cee\ code in a compressed format,
+appear in |tok_mem| as mentioned above. The codes in
+these texts are called `tokens'; some tokens occupy two consecutive
+eight-bit byte positions, and the others take just one byte.
+
+If $p$ points to a replacement text, |p->tok_start| is the |tok_mem| position
+of the first eight-bit code of that text. If |p->text_link=0|,
+this is the replacement text for a macro, otherwise it is the replacement
+text for a module. In the latter case |p->text_link| is either equal to
+|module_flag|, which means that there is no further text for this module, or
+|p->text_link| points to a continuation of this replacement text; such
+links are created when several modules have \cee\ texts with the same
+name, and they also tie together all the \cee\ texts of unnamed modules.
+The replacement text pointer for the first unnamed module appears in
+|text_info->text_link|, and the most recent such pointer is |last_unnamed|.
+
+@d module_flag = max_texts /* final |text_link| in module replacement texts */
+
+@<Glob...@>=
+text_pointer last_unnamed; /* most recent replacement text of unnamed module */
+
+@ @<Set init...@>= last_unnamed=text_info; text_info->text_link=0;
+
+@ If the first byte of a token is less than |@'200|, the token occupies a
+single byte. Otherwise we make a sixteen-bit token by combining two consecutive
+bytes |a| and |b|. If |@'200<=a<@'250|, then |(a-@'200)@t${}\times2^8$@>+b|
+to an identifier; if |@'250<=a<@'320|, then
+|(a-@'250)@t${}\times2^8$@>+b| points to a module name; otherwise, i.e., if
+|@'320<=a<@'400|, then |(a-@'320)@t${}\times2^8$@>+b| is the number of the module
+in which the current replacement text appears.
+
+Codes less than @'200 are 7-bit ASCII codes that represent themselves.
+In particular, a single-character identifier like `|x|' will be a one-byte
+token, while all longer identifiers will occupy two bytes.
+
+Some of the 7-bit ASCII codes will not be present, however, so we can
+use them for special purposes. The following symbolic names are used:
+
+\yskip \hang |join| denotes the concatenation of adjacent items with no
+space or line breaks allowed between them (the \.{@@\&} operation of \.{WEB}).
+
+\hang |string| denotes the beginning or end of a string, verbatim
+construction or numerical constant.
+@^ASCII code@>
+
+@d string = @'2
+@d param = @'7
+@d join = @'177 /* ASCII delete will not appear */
+
+@ The following procedure is used to enter a two-byte value into
+|tok_mem| when a replacement text is being generated.
+
+@u store_two_bytes(x)
+sixteen_bits x;
+{
+  if (tok_ptr+2>tok_mem_end) overflow("token");
+  *tok_ptr++=x>>8; /* store high byte */
+  *tok_ptr++=x&@'377; /* store low byte */
+}
+
+
+@* Stacks for output.  The output process uses a stack to keep track
+of what is going on at different ``levels'' as the modules are being
+written out.  Entries on this stack have five parts:
+
+\yskip\hang |end_field| is the |tok_mem| location where the replacement
+text of a particular level will end;
+
+\hang |byte_field| is the |tok_mem| location from which the next token
+on a particular level will be read;
+
+\hang |name_field| points to the name corresponding to a particular level;
+
+\hang |repl_field| points to the replacement text currently being read
+at a particular level.
+
+\hang |mod_field| is the module number, or zero if this is a macro.
+
+\yskip\noindent The current values of these five quantities are referred to
+quite frequently, so they are stored in a separate place instead of in
+the |stack| array. We call the current values |cur_end|, |cur_byte|,
+|cur_name|, |cur_repl|, and |cur_mod|.
+
+The global variable |stack_ptr| tells how many levels of output are
+currently in progress. The end of all output occurs when the stack is
+empty, i.e., when |stack_ptr=stack|.
+
+@<Typed...@>=
+typedef struct {
+  eight_bits *end_field; /* ending location of replacement text */
+  eight_bits *byte_field; /* present location within replacement text */
+  name_pointer name_field; /* |byte_start| index for text being output */
+  text_pointer repl_field; /* |tok_start| index for text being output */
+  sixteen_bits mod_field; /* module number or zero if not a module */
+} output_state;
+typedef output_state *stack_pointer;
+
+@ @d cur_end = cur_state.end_field /* current ending location in |tok_mem| */
+@d cur_byte = cur_state.byte_field /* location of next output byte in |tok_mem|*/
+@d cur_name = cur_state.name_field /* pointer to current name being expanded */
+@d cur_repl = cur_state.repl_field /* pointer to current replacement text */
+@d cur_mod = cur_state.mod_field /* current module number being expanded */
+
+@<Global...@>=
+output_state cur_state; /* |cur_end|, |cur_byte|, |cur_name|, |cur_repl|
+  and |cur_mod| */
+output_state stack[stack_size+1]; /* info for non-current levels */
+stack_pointer stack_ptr; /* first unused location in the output state stack */
+stack_pointer stack_end=stack+stack_size; /* end of |stack| */
+
+@ To get the output process started, we will perform the following
+initialization steps. We may assume that |text_info->text_link| is nonzero,
+since it points to the \cee\ text in the first unnamed module that generates
+code; if there are no such modules, there is nothing to output, and an
+error message will have been generated before we do any of the initialization.
+
+@<Initialize the output stacks@>=
+stack_ptr=stack+1; cur_name=name_dir; cur_repl=text_info->text_link+text_info;
+cur_byte=cur_repl->tok_start; cur_end=(cur_repl+1)->tok_start; cur_mod=0;
+
+@ When the replacement text for name |p| is to be inserted into the output,
+the following subroutine is called to save the old level of output and get
+the new one going.
+
+We assume that the C compiler can copy structures.
+@^system dependencies@>
+
+@u push_level(p) /* suspends the current level */
+name_pointer p;
+{
+  @<Trace the name of what's pushed (|#ifdef TRACE_MACROS|)@>;
+  if (stack_ptr==stack_end) overflow("stack");
+  *stack_ptr=cur_state;
+  stack_ptr++;
+  cur_name=p; cur_repl=(text_pointer)p->equiv;
+  cur_byte=cur_repl->tok_start; cur_end=(cur_repl+1)->tok_start;
+  cur_mod=0;
+}
+
+@ @<Trace the name of what's pushed (|#ifdef TRACE_MACROS|)@>=
+#ifdef TRACE_MACROS
+  if (tracing>0) {
+	printf("\nPushing "); print_id(p);
+	printf(" =nd[%d]",p-name_dir);
+	}
+#endif TRACE_MACROS
+
+@ When we come to the end of a replacement text, the |pop_level| subroutine
+does the right thing: 
+It either moves to the continuation of this replacement
+text or returns the state to the most recently stacked level.
+If this level is the end of a macro definition, it pops all the parameters
+off the stack.
+
+@u pop_level() /* do this when |cur_byte| reaches |cur_end| */
+{ int number_of_parameters;
+@<Trace the name of what's popped (|#ifdef TRACE_MACROS|)@>;
+  if (cur_repl->text_link==0) { /* macro definition */
+	if (cur_name->ilk==macro) {
+		@<Pop the parameters from the parameter stack@>;
+	}
+  } else if (cur_repl->text_link<module_flag) { /* link to a continuation */
+    cur_repl=cur_repl->text_link+text_info; /* stay on the same level */
+    cur_byte=cur_repl->tok_start; cur_end=(cur_repl+1)->tok_start;
+    return;
+  }
+  stack_ptr--; /* go down to the previous level */
+  if (stack_ptr>stack) cur_state=*stack_ptr;
+}
+
+
+@ @<Pop the parameters...@>=
+number_of_parameters=*(cur_repl->tok_start);
+@<Trace number of parms popped (|#ifdef TRACE_MACROS|)@>;
+while (number_of_parameters-->0) {
+	name_ptr--; text_ptr--;
+#ifdef TRACE_MACROS
+byte_ptr-=2;
+#endif TRACE_MACROS
+	}
+#ifdef STAT
+#ifdef STAT_HAS_BEEN_FIXED
+	if (tok_ptr>max_tok_ptr) max_tok_ptr = tok_ptr;
+		/* maximum value of |tok_ptr| occurs just before
+			parameter popping */
+#endif STAT_HAS_BEEN_FIXED
+#endif STAT
+tok_ptr = text_ptr->tok_start;
+
+
+@ @<Trace number of parms popped (|#ifdef TRACE_MACROS|)@>=
+#ifdef TRACE_MACROS
+if (tracing>1) {
+	printf("\nUnstacking %d parameters",number_of_parameters);
+	}
+#endif TRACE_MACROS
+@ @<Trace the name of what's popped (|#ifdef TRACE_MACROS|)@>=
+#ifdef TRACE_MACROS
+  if (tracing>0) {
+	printf("\nPopping "); print_id(cur_name);
+	printf(" =nd[%d]",cur_name-name_dir);
+	}
+	
+#endif TRACE_MACROS
+
+
+
+@*1 Expanding macros.
+ The heart of the output procedure is the |get_output| routine, which produces
+the next token of output that is not a reference to a macro. This procedure
+handles all the stacking and unstacking that is necessary.
+
+@ Before we can get on to |get_output|,
+we have to talk about expanding macros.
+Macro parameters must be stacked.  
+They are placed in |tok_mem| just
+above the other replacement texts, and dummy parameter ``names'' are
+placed in |byte_start| just after the other names.
+The variables |text_ptr| and |tok_ptr| essentially serve
+as parameter stack pointers during the output phase, so there is
+no need for a separate data structure to handle this problem.
+
+
+@ Here are our invariants (assuming $\#$ represents |param|):
+(1) in a replacement text, $\#n$ always refers to |*(name_ptr-n)|.
+(2) when a parameter is scanned, any $\#n$ are replaced with references 
+to the appropriate name, so that the replacement text for a parameter
+never contains a $\#n$.
+(3) |name_ptr| is not changed until all the parameters are scanned; 
+otherwise invariant (1) wouldn't work during parameter scanning.
+(4) when all parameters are scanned, |name_ptr| is moved 
+so that $\#n$ in the replacement text will be interpreted correctly.
+(5) When we have finished scanning the replacement text for a macro, we 
+have to pop |name_ptr| to maintain the invariant in (1).
+
+@ |get_output| returns the value |module_number|
+if the next output begins or ends the replacement text of some module,
+in which case |cur_val| is that module's number (if beginning) or the
+negative of that value (if ending). (A module number of 0 indicates
+not the beginning or ending of a module, but a \&{\#line} command.)
+And it returns the value |identifier|
+if the next output is an identifier of length two or more, in which case
+|cur_val| points to that identifier name.
+
+@d module_number = @'201 /* code returned by |get_output| for module numbers */
+@d identifier = @'202
+@<Global...@>=
+int cur_val; /* additional information corresponding to output token */
+
+
+@ If |get_output| finds that no more output remains, it returns the value zero.
+@u sixteen_bits
+get_output() /* returns next token after macro expansion */
+{ 
+  sixteen_bits a; /* value of current byte */
+  restart: if (stack_ptr==stack) return 0;
+  if (cur_byte==cur_end) {
+    cur_val=-((int)cur_mod); /* cast needed because of sign extension */
+    pop_level();
+    if (cur_val==0) goto restart;
+    out_char(module_number); return;
+  }
+  a=*cur_byte++;
+  if (a<@'200) 
+	if(a==param) {
+		@<Trace parameter number (|#ifdef TRACE_MACROS|)@>;
+		@<Get the parameter number, set up to substitute 
+			that parameter, and go to |restart|@>;
+	} else
+		out_char(a); /* one-byte token */
+  else {
+    a=(a-@'200)*@'400+*cur_byte++;
+    switch (a/@'24000) { /* |@'24000=(@'250-@'200)*@'400| */
+      case 0: 
+	@<If |a| is a macro, set it up and go to |restart|@>;
+	cur_val=a; out_char(identifier); break;
+      case 1: @<Expand module |a-@'24000|, |goto restart|@>;
+      default: cur_val=a-@'50000; if (cur_val>0) cur_mod=cur_val;
+	out_char(module_number);
+    }
+  }
+  return 1;
+}
+
+
+@ @<Get the parameter number...@>=
+push_level(name_ptr-*cur_byte++); goto restart;
+@ @<Trace parameter number...@>=
+#ifdef TRACE_MACROS
+if (tracing>2) {
+	printf (" [#%d]",*cur_byte);
+	}
+#endif TRACE_MACROS
+
+@ @<If |a| is a macro...@>=
+if (name_dir[a].ilk==macro) {
+	@<Trace macro expansion (|#ifdef TRACE_MACROS|)@>;
+	@<Scan the parameters (if any) and stack them, 
+		or go to |restart| if an error occurs@>;
+	push_level(name_dir+a);
+	cur_byte++; /* skip number of parameters */
+	goto restart;
+} else if (name_dir[a].ilk==simple) {
+	@<Trace parameter expansion (|#ifdef TRACE_MACROS|)@>;
+	push_level(name_dir+a);
+	goto restart;
+}
+
+@ @<Trace macro expansion (|#ifdef TRACE_MACROS|)@>=
+#ifdef TRACE_MACROS
+if (tracing>2) {
+	printf("\nExpanding macro ("); print_id(name_dir+a); 
+	printf("=nd[%d])",a);
+	}
+#endif TRACE_MACROS
+
+@ @<Trace parameter expansion (|#ifdef TRACE_MACROS|)@>=
+#ifdef TRACE_MACROS
+if (tracing>2) {
+	printf("\nExpanding parameter ("); print_id(name_dir+a);
+	printf("=nd[%d])",a);
+	}
+#endif TRACE_MACROS
+
+
+@ @<Scan the parameters...@>=
+{int number_of_parameters;
+	while (cur_byte==cur_end && stack_ptr>stack) pop_level();
+	number_of_parameters = *(((text_pointer)name_dir[a].equiv)->tok_start);
+	if (number_of_parameters>0) {
+		if (stack_ptr==stack || *cur_byte!=@`(') {
+			printf("\n! No parameters given for ");
+			print_id(a+name_dir);
+			err_print("");
+			goto restart;
+		}
+		cur_byte++; /* skip left parenthesis */
+		parm_ptr = name_ptr; /* maintain |name_ptr| invariant */
+		while (number_of_parameters-->0) {
+			@<Stack a parameter ending in 
+				comma or parenthesis@>;
+		}
+		name_ptr=parm_ptr; /* we are about to |push_level|, 
+			so this maintains the |name_ptr| invariant */
+	}
+}
+
+@ In scanning parameter lists, we require that parameters be separated
+by commas, and that parentheses balance in parameters.
+The balancing is done with the array |balances|, and {\tt SPIDER}
+could easily be extended to make certain tokens {\tt balance left} and
+other tokens {\tt balance right}, so that {\tt left} and {\tt right}
+tokens balance in parameters.
+@ @<Global variables@>=
+short balances[@'200];
+@ @<Set initial values@>=
+{ int i;
+for (i=0;i<@'200;i++) balances[i]=0;
+@<Set special |balances|@>;
+}
+@ Eventually we will want {\tt SPIDER} to set balances.
+For now let's try just tossing in parenthesis, braces, and square brackets.
+@<Set special |balances|@>=
+balances[@`(']=1;
+balances[@`)']=-1;
+balances[@`[']=1;
+balances[@`]']=-1;
+balances[@`{']=1;
+balances[@`}']=-1;
+
+@ @<Stack a parameter...@>=
+{ int bal; /* used to balance parentheses in parameter lists */
+	eight_bits b, oldb;
+	sixteen_bits c;
+bal=0;
+@<Trace scanning for stack (|#ifdef TRACE_MACROS|)@>;
+while (1) {
+	b=*cur_byte++;
+	if (b==param) { /* convert to name reference */
+		b=*cur_byte++;
+		@<Trace parameter scansion (|#ifdef TRACE_MACROS|)@>;
+		c=name_ptr-name_dir-b; /* |name_ptr-b| points to parm */
+		app_repl(@'200 + (c/@'400));
+		app_repl(c % @'400);
+	} else {
+		if (b>=@'200) {
+		    @<Trace scansion of token in |b| (|#ifdef TRACE_MACROS|)@>;
+		    app_repl(b);
+		    b=*cur_byte++;
+		} else if (bal==0 && ((number_of_parameters==0 && b==@`)')
+				    || (number_of_parameters>0 && b==@`,'))) {
+			goto done;
+		} else if (@<|b| opens verbatim or string@>) {
+		    @<Copy verbatim or string token list beginning with |b|@>;
+		} else {
+			@<Trace scansion of ordinary token in |b|@>;
+			bal += balances[b];
+		}
+		app_repl(b);
+	}
+}
+done:
+parm_ptr->equiv=(ASCII *)text_ptr;
+text_ptr->text_link=0; /* label a macro */
+parm_ptr->ilk=simple; /* treat parm \# like simple macro */
+#ifdef TRACE_MACROS
+if(byte_ptr+2>=byte_mem_end) overflow("byte memory");
+*byte_ptr++=@`#'; *byte_ptr++=number_of_parameters+1+@`0';
+#endif TRACE_MACROS
+if (parm_ptr>=name_dir_end) overflow ("name");
+(++parm_ptr)->byte_start=byte_ptr;
+  if (text_ptr>=text_info_end) overflow("text");
+ (++text_ptr)->tok_start=tok_ptr;
+@<Trace stacking the parameter (|#ifdef TRACE_MACROS|)@>;
+}
+
+@ @<Global variables@>=
+name_pointer parm_ptr; /* used while stacking parameters */
+
+@ @<|b| opens verbatim or string@>=(b==string||b==constant)
+@ @<Copy verbatim or string...@>=
+app_repl(b);
+oldb=b;
+@<Write |" <"| (|#ifdef TRACE_MACROS|)@>;
+while((b=*cur_byte++)!=oldb) {
+@<Trace scansion of character |b| (|#ifdef TRACE_MACROS|)@>;
+	app_repl(b);
+	if (cur_byte>=cur_end) 
+		confusion("string or constant didn't end in token list");
+}
+@<Write |">"| (|#ifdef TRACE_MACROS|)@>;
+
+	
+	
+@ @<Write |" <"| (|#ifdef TRACE_MACROS|)@>=
+#ifdef TRACE_MACROS
+if(tracing>2) printf(" <");
+#endif TRACE_MACROS
+@ @<Trace scansion of character |b| (|#ifdef TRACE_MACROS|)@>= 
+#ifdef TRACE_MACROS
+if (tracing>2) printf("%c",b);
+#endif TRACE_MACROS
+@ @<Write |">"| (|#ifdef TRACE_MACROS|)@>=
+#ifdef TRACE_MACROS
+if(tracing>2) printf(">");
+#endif TRACE_MACROS
+@ @<Trace parameter scansion (|#ifdef TRACE_MACROS|)@>=
+#ifdef TRACE_MACROS
+if (tracing>2) {
+	printf (" <#%d=",b); print_id(name_ptr-b); printf("=nd[%d]>",
+		name_ptr-b-name_dir);
+	}
+#endif TRACE_MACROS
+
+@ @<Trace scansion of token in |b| (|#ifdef TRACE_MACROS|)@>=
+#ifdef TRACE_MACROS
+if (tracing>2) {
+	int c;
+	printf (" <"); 
+	c=(b-@'200)*@'400+*cur_byte;
+	switch (c/@'24000) {
+		case 0: print_id(name_dir+c); 
+			printf(" =nd[%d]",c);
+			break;
+		case 1: printf("MODULE"); break;
+		default: printf("CONTEXT"); break;
+	}
+	printf(">");
+}
+#endif TRACE_MACROS
+
+@ @<Trace scansion of ordinary token in |b|@>=
+#ifdef TRACE_MACROS
+if (tracing>2) {
+	printf (" <"); 
+	if (@'37<b && b<@'177) printf("%c",b);
+	printf(">");
+}
+#endif TRACE_MACROS
+
+@ @<Trace scanning for stack (|#ifdef TRACE_MACROS|)@>=
+#ifdef TRACE_MACROS
+if (tracing>2) {
+	printf ("\nScanning #%d...", number_of_parameters+1);
+	}
+#endif TRACE_MACROS
+@ @<Trace stacking the parameter (|#ifdef TRACE_MACROS|)@>=
+#ifdef TRACE_MACROS
+if (tracing>1) {
+	printf ("\nStacked "); print_id(parm_ptr-1);
+	printf ("=nd[%d]", parm_ptr-1-name_dir);
+	}
+#endif TRACE_MACROS
+
+@ The user may have forgotten to give any \cee\ text for a module name,
+or the \cee\ text may have been associated with a different name by mistake.
+
+@<Expand module |a-...@>=
+  a-=@'24000;
+  if ((a+name_dir)->equiv!=(ASCII *)text_info) push_level(a+name_dir);
+  else if (a!=0) {
+    printf("\n! Not present: <"); print_id(a+name_dir); err_print(">");
+@.Not present: <section name>@>
+  }
+  goto restart;
+
+@* Producing the output.
+The |get_output| routine above handles most of the complexity of output
+generation, but there is one further consideration that has a nontrivial
+effect on \.{TANGLE}'s algorithms.  Namely,
+we want to make sure that the output has spaces and line breaks in
+the right places (e.g., not in the middle of a string or a constant or an
+identifier, not at a `\.{@@\&}' position
+where quantities are being joined together, and certainly after a \.=
+because the C compiler thinks \.{=-} is ambiguous).
+
+The output process can be in one of following states:
+
+\yskip\hang |num_or_id| means that the last item in the buffer is a number or
+identifier, hence a blank space or line break must be inserted if the next
+item is also a number or identifier.
+
+\yskip\hang |unbreakable| means that the last item in the buffer was followed
+by the \.{@@\&} operation that inhibits spaces between it and the next item.
+
+\yskip\hang |verbatim| means we're copying only character tokens, and
+that they are to be output exactly as stored.  This is the case during
+strings, verbatim constructions and numerical constants.
+
+\yskip\hang |misc| means none of the above.
+
+\yskip Furthermore, if the variable |protect| is positive, new-lines
+are preceded by a `\.\\'.% note this for /*spider*/
+
+@d misc = 0 /* ``normal'' state */
+@d num_or_id = 1 /* state associated with numbers and identifiers */
+@d unbreakable = 3 /* state associated with \.{@@\&} */
+@d verbatim = 4 /* state in the middle of a string */
+
+@<Global...@>=
+eight_bits out_state; /* current status of partial output */
+boolean protect; /* current status of partial output */
+
+@ Here is a routine that is invoked when we want to output the current line.
+During the output process, |cur_line| equals the number of the next line
+to be output.
+
+@u flush_buffer() /* writes one line to output file */
+{
+  C_putc('\n');
+  if (cur_line % 100 == 0) {
+    printf(".");
+    if (cur_line % 500 == 0) printf("%d",cur_line);
+    update_terminal; /* progress report */
+  }
+  cur_line++;
+}
+
+@* The big output switch.  Here then is the routine that does the
+output.
+We have made some modifications to \.{TANGLE} so it will write output
+on multiple files.
+We do this very simply: if a module name is introduced by \.{@@(}
+instead of \.{@@<}, we treat it as the name of a file.
+All these special modules are saved on a stack, |output_files|.
+We write them out after we've done the unnamed module.
+
+@d max_files = 256
+@<Glob...@>=
+name_pointer output_files[max_files];
+name_pointer *cur_out_file, *end_output_files, *an_output_file;
+char cur_module_char; /* is it |'<'| or |'('| */
+char output_file_name[longest_name]; /* name of the file */
+
+@ We make |end_output_files| point jsut beyond the end of
+|output_files|.
+|cur_out_file| starts out there. Every time we see a new file, we
+decrement |cur_out_file| and then write it in.
+@<Set initial...@>=
+cur_out_file=end_output_files=output_files+max_files;
+
+@ @<If it's not there, add |cur_module| to the output file stack, or
+complain we're out of room@>=
+{
+if (cur_out_file>output_files) {
+        for (an_output_file=cur_out_file;
+		an_output_file<end_output_files; an_output_file++) 
+			if (*an_output_file==cur_module) break;
+	if (an_output_file==end_output_files)
+		*--cur_out_file=cur_module;
+} else {
+	overflow("output files");
+}
+}
+
+@ Here is the output switch, then...
+
+@u
+phase_two () {
+  cur_line=1;
+  if (text_info->text_link==0) {
+    if(end_output_files==cur_out_file) {
+      printf("\n! No program text was specified."); mark_harmless;
+@.No output was specified@>
+     }
+  } else {
+    printf("\nWriting the output files: (%s)",C_file_name); update_terminal;
+    @<Initialize the output stacks@>;
+    while (stack_ptr>stack) get_output();
+    flush_buffer();
+  }
+  if (end_output_files>cur_out_file) {
+    if(text_info->text_link==0) {
+       printf("\nWriting the output files: "); update_terminal;
+    }
+    @<Write all the named output files@>@;
+  }
+  printf("\nDone.");
+}
+
+@ To write the named output files, we proceed as for the unnamed
+module.
+The only subtlety is that we have to open each one.
+@<Write all the named output files@>=
+for (an_output_file=end_output_files; an_output_file>cur_out_file;) {
+	an_output_file--;
+	strncpy(output_file_name,(*an_output_file)->byte_start, longest_name);
+	output_file_name[length(*an_output_file)]='\0';
+	fclose(C_file);
+	C_file=fopen(output_file_name,"w");
+	if (C_file <=0) {
+		fatal("! Cannot open output file:",output_file_name)@;
+	} else {
+		printf(" (%s)",output_file_name); update_terminal;
+	}
+	stack_ptr=stack+1;
+	cur_name= (*an_output_file);
+	cur_repl= (text_pointer) cur_name->equiv_or_xref;
+	cur_byte=cur_repl->tok_start;
+	cur_end=(cur_repl+1)->tok_start;
+	cur_mod=0;
+	while (stack_ptr > stack) get_output();
+	flush_buffer();
+}	
+
+
+
+@ A many-way switch is used to send the output:
+
+@u out_char(cur_char)
+eight_bits cur_char;
+{
+  ASCII *j; /* pointer into |byte_mem| */
+    @<Trace |cur_char| (|#ifdef TRACE_MACROS|)@>;
+    switch (cur_char) {
+      case @`\n': if (protect) C_putc(' '); /*spider*/
+	if (protect || out_state==verbatim) C_putc('\\'); /*spider*/
+			/*spider*/ /*may need to escape newlines*/
+	flush_buffer(); if (out_state!=verbatim) out_state=misc; break;
+      @/@t\4@>@<Case of an identifier@>;
+      @/@t\4@>@<Case of a module number@>;
+	@<Cases for tokens to be output@>@;
+      case join: out_state=unbreakable; break;
+      case constant: if (out_state==verbatim) {
+	  out_state=num_or_id; break;
+	}
+        if(out_state==num_or_id) C_putc(' '); out_state=verbatim; break;
+      case string: if (out_state==verbatim) out_state=misc;
+        else out_state=verbatim; break;
+      default: C_putc(cur_char); if (out_state!=verbatim) out_state=misc;
+        break;
+    }
+}
+
+@ @<Trace |cur_char| (|#ifdef TRACE_MACROS|)@>=
+#ifdef TRACE_MACROS
+if (tracing>2) {
+	switch(cur_char) {
+		case @`\n': printf(" [\\n]"); break;
+		case string:
+			printf( "[STRING]"); break;
+		case join:
+			printf( "[JOIN]"); break;
+		case constant:
+			printf( "[CONSTANT]"); break;
+		case identifier:
+			printf (" ["); print_id(cur_val+name_dir); printf("]");
+			break;
+		case module_number:
+			if (cur_val>0) {
+				printf(" [%d:]", cur_val);
+			} else if(cur_val<0) {
+				printf(" [:%d]", - cur_val);
+			} else {
+				printf( "[LINE NUMBER]");
+			}
+			break;
+		
+		default: 
+			if (@'37<cur_char && cur_char < @'177) {
+				printf (" [%c]", cur_char);
+			} else {
+				printf(" [\\%3o]",cur_char);
+			}
+	}
+}
+#endif TRACE_MACROS
+
+
+
+
+@ @<Case of an identifier@>=
+case identifier:
+  if (out_state==num_or_id) C_putc(' ');
+  for (j=(cur_val+name_dir)->byte_start; j<(name_dir+cur_val+1)->byte_start;
+    j++) C_putc(*j);
+  out_state=num_or_id; break;
+
+@ @<Case of a mod...@>=
+case module_number:
+  if (cur_val>0) {
+	C_printf("%s",begin_comment_string);
+        C_printf("%d:",cur_val);
+	C_printf("%s",end_comment_string);
+  } else if(cur_val<0) {
+	C_printf("%s",begin_comment_string);
+        C_printf(":%d",-cur_val);
+	C_printf("%s",end_comment_string);
+  } else {
+    sixteen_bits a;
+    a=@'400* *cur_byte++;
+    a+=*cur_byte++; /* gets the line number */
+    C_printf("\n%s",sharp_line_open);
+    C_printf(" %d \"",a);
+    cur_val=*cur_byte++;
+    cur_val=@'400*(cur_val-@'200)+ *cur_byte++; /* points to the file name */
+    for (j=(cur_val+name_dir)->byte_start; j<(name_dir+cur_val+1)->byte_start;
+      j++) C_putc(*j);
+    C_printf("\"%s\n",sharp_line_close);
+  }
+  break;
+
+@i outtoks.web
+@* Introduction to the input phase.
+We have now seen that \.{TANGLE} will be able to output the full
+\cee\ program, if we can only get that program into the byte memory in
+the proper format. The input process is something like the output process
+in reverse, since we compress the text as we read it in and we expand it
+as we write it out.
+
+There are three main input routines. The most interesting is the one that gets
+the next token of a \cee\ text; the other two are used to scan rapidly past
+\TeX\ text in the \.{WEB} source code. One of the latter routines will jump to
+the next token that starts with `\.{@@}', and the other skips to the end
+of a \cee\ comment.
+
+@ Control codes in \.{WEB} begin with `\.{@@}', and the next character
+identifies the code. Some of these are of interest only to \.{WEAVE},
+so \.{TANGLE} ignores them; the others are converted by \.{TANGLE} into
+internal code numbers by the |control_code| table below. The ordering
+of these internal code numbers has been chosen to simplify the program logic;
+larger numbers are given to the control codes that denote more significant
+milestones.
+
+@d ignore = 0 /* control code of no interest to \.{TANGLE} */
+@d octal = @'5
+@d hex = @'6
+@d trace = @'370
+@d ascii_constant = @'371 /* control code for `\.{@@`}' */
+@d control_text = @'372 /* control code for `\.{@@t}', `\.{@@\^}', etc. */
+@d format = @'373 /* control code for `\.{@@f}' */
+@d definition = @'374 /* control code for `\.{@@d}' */
+@d begin_unnamed = @'375 /* control code for `\.{@@u}' */
+@d module_name = @'376 /* control code for `\.{@@<}' */
+@d new_module = @'377 /* control code for `\.{@@\ }' and `\.{@@*}' */
+
+@<Global...@>=
+eight_bits ccode[128]; /* meaning of a char following \.{@@} */
+
+@ @<Set ini...@>= {
+  int c; /* must be |int| so the |for| loop will end */
+  for (c=0; c<=127; c++) ccode[c]=ignore;
+  ccode[' ']=ccode[tab_mark]=ccode['*']=new_module;
+  ccode ['@@'] = '@@';  
+  ccode['=']=string;
+  ccode['d']=ccode['D']=definition; 
+  ccode['f']=ccode['F']=format;
+  ccode['c']=ccode['C']=begin_unnamed;
+  ccode['u']=ccode['U']=begin_unnamed;
+  ccode['^']=ccode[':']=ccode['.']=ccode['t']=ccode['T']=control_text;
+  ccode['&']=join; 
+  ccode['<']=ccode['(']=module_name; 
+  ccode['`']=ascii_constant;
+  ccode['\'']=octal;
+  ccode['"']=hex;
+/*Now adjust for |at_sign|... if it is @@, we have no-op followed by quoting */
+/* ... but if it is other, say \#, then \#@@ replaces @@\#, and \#\# 
+	quotes itself*/
+ccode['@@']=ccode[at_sign];
+ccode[at_sign]=at_sign;
+
+#ifdef DEBUG
+ccode['0']=ccode['1']=ccode['2']=ccode['3']=ccode['4']=trace;
+#endif DEBUG
+
+}
+
+@ We may want some sort of tracing facility:
+@<Global variables@>=short tracing;
+@ @<Set initial...@>=tracing=0;
+
+@ The |skip_ahead| procedure reads through the input at fairly high speed
+until finding the next non-ignorable control code, which it returns.
+
+@u eight_bits skip_ahead() /* skip to next control code */
+{
+  eight_bits c; /* control code found */
+  while (1) {
+    if (loc>limit && (get_line()==0)) return(new_module);
+    *(limit+1)=at_sign;
+    while (*loc!=at_sign) loc++;
+    if (loc<=limit) {
+      loc++; c=ccode[*loc]; 
+#ifdef DEBUG
+    if (c==trace) {
+	tracing=*loc-@`0'; c=ignore;
+    }
+#endif DEBUG
+      loc++;
+      if (c!=ignore || *(loc-1)=='>') return(c);
+    }
+  }
+}
+
+@ The |skip_comment| procedure reads through the input at somewhat high
+speed until finding the end-comment token \.{*/} or a new-line, in which
+case |skip_comment| will be called again by |get_next|, since the
+comment is not finished.  This is done so that the each newline in the
+C part of a module is copied to the output; otherwise the \&{\#line}
+commands inserted into the C file by the output routines become useless.
+If it comes to the end of the module it prints an error message.
+
+@<Global...@>=
+boolean comment_continues=0; /* are we scanning a comment? */
+
+@ @u
+skip_comment() /* skips over comments */
+{
+  ASCII c; /* current character */
+  if (comments_end_with_newline) {
+     get_line();
+     return (comment_continues=0);
+  } else {
+    while (1) {/*spider*/ /* fix this to recognize end ok */
+      if (loc>limit)
+        if(get_line()) return(comment_continues=1);
+        else{
+          err_print("! Input ended in mid-comment");
+@.Input ended in mid-comment@>
+          return(comment_continues=0);
+        }
+      c=*(loc++);
+      @<Recognize comment end starting at |loc-1|@>@;      
+      if (c==at_sign) {
+        if (ccode[*loc]==new_module) {
+          err_print("! Section name ended in mid-comment"); loc--;
+@.Section name ended in mid-comment@>
+          return(comment_continues=0);
+        }
+        else loc++;
+      }
+    }
+  }
+}
+@* Inputting the next token.
+@d constant = @'3
+@<Global...@>=
+name_pointer cur_module; /* name of module just scanned */
+
+@ @<Include...@>=
+#include "ctype.h" /* definition of |isalpha|, |isdigit| and so on */
+
+@ As one might expect, |get_next| consists mostly of a big switch
+that branches to the various special cases that can arise.
+
+@u eight_bits get_next() /* produces the next input token */
+{
+  eight_bits c; /* the current character */
+  while (1) {
+    if (loc>limit) {
+      if (get_line()==0) return(new_module);
+      else if (print_where) {
+          print_where=0;
+          @<Insert the line number into |tok_mem|@>;
+        }
+        else return (@`\n');
+    }
+    c=*loc;
+    if (comment_continues) {
+      skip_comment(); /* scan to end of comment or newline */
+      if (comment_continues || comments_end_with_newline) return(@`\n');
+      else continue;
+    }
+    @<See a comment starting at |loc| and skip it@>@;
+    loc++;
+    if (isdigit(c) || c=='\\' || c=='.') @<Get a constant@>@;/*spider*/
+    else if (isalpha(c) || c=='_' || c=='$') @<Get an identifier@>@;/*spider*/
+    else if (c=='\'' || c=='\"') @<Get a string@>@;/*spider*/
+    else if (c==at_sign) @<Get control code and possible module name@>@;
+    else if (c==' ' || c==tab_mark) {
+	continue;  /* ignore spaces and tabs */
+    }
+    mistake: @<Compress two-symbol operator@>@;
+    return(c);
+  }
+}
+
+@ @<Get an identifier@>= {/*spider*/
+  id_first=--loc;
+  while (isalpha(*++loc) || isdigit(*loc) || *loc=='_');
+  if (*loc=='$') while (isdigit(*++loc)||*loc=='$');
+ 	/* make room for \$\$ and \$nnn suffixes */
+  id_loc=loc; return(identifier);
+}
+
+@ @<Get a constant@>= {/*spider*/
+  id_first=loc-1;
+  if (*id_first=='.' && !isdigit(*loc)) goto mistake; /* not a constant */
+  if (*id_first=='\\') while (isdigit(*loc)) loc++; /* octal constant */
+  else {
+    if (*id_first=='0') {
+      if (*loc=='x' || *loc=='X') { /* hex constant */
+        loc++; while (isxdigit(*loc)) loc++; goto found;
+      }
+    }
+    while (isdigit(*loc)) loc++;
+    if (*loc=='.') {
+	loc++;
+	while (isdigit(*loc)) loc++;
+	}
+    if (*loc=='e' || *loc=='E') { /* float constant */
+      if (*++loc=='+' || *loc=='-') loc++;
+      while (isdigit(*loc)) loc++;
+    }
+  }
+  found: 
+  id_loc=loc;
+  return(constant);
+}
+
+@ \cee\ strings and character constants, delimited by double and single
+quotes, respectively, can contain newlines or instances of their own
+delimiters if they are protected by a backslash.  We follow this
+convention, but do not allow the string to be longer than |longest_name|.
+
+@<Get a string@>= {/*spider*/
+  ASCII delim = c; /* what started the string */
+@#
+/* if it's not a single-character literal, it's a tick mark or an |at_sign| */
+  if (delim=='\'' && (loc+1>=limit || 
+			(*loc != '\\' && *loc!=at_sign && loc[1]!='\'')	|| 
+			(*loc=='\\' && (loc+2>=limit||loc[2]!='\'')) ||
+			(*loc==at_sign && 
+			    (loc+2>=limit||loc[1]!=at_sign||loc[2]!='\''))
+		     )) goto mistake;
+  id_first = mod_text+1;
+  id_loc = mod_text; *++id_loc=delim;
+  while (1) {
+    if (loc>=limit) {
+      if(*(limit-1)!='\\') {
+        err_print("! String didn't end"); loc=limit; break;
+@.String didn't end@>
+      }
+      if(get_line()==0) {
+        err_print("! Input ended in middle of string"); loc=buffer; break;
+@.Input ended in middle of string@>
+      }
+      else if (++id_loc<=mod_text_end) *id_loc=@`\n'; /* will print as
+      \.{"\\\\\\n"} */
+    }
+    if ((c=*loc++)==delim) {
+      if (++id_loc<=mod_text_end) *id_loc=c;
+      break;
+    }
+    if (c=='\\') {
+      if (loc>=limit) continue;
+      if (++id_loc<=mod_text_end) *id_loc = '\\';
+      c=*loc++;
+    }
+    if (++id_loc<=mod_text_end) *id_loc=c;
+  }
+  if (id_loc>=mod_text_end) {
+    printf("\n! String too long: ");
+@.String too long@>
+    ASCII_write(mod_text+1,25);
+    printf("..."); mark_error;
+  }
+  id_loc++;
+  return(string);
+}
+
+@ After an \.{@@} sign has been scanned, the next character tells us
+whether there is more work to do.
+
+@<Get control code and possible module name@>= {
+  c=ccode[*loc++];
+  switch(c) {
+    case ignore: continue;
+    case control_text: while ((c=skip_ahead())==at_sign);
+      /* only \.{@@@@} and \.{@@>} are expected */
+      if (*(loc-1)!='>') err_print("! Improper @@ within control text");
+@.Improper {\AT!} within control text@>
+      continue;
+    case module_name: 
+	cur_module_char=*(loc-1);
+	@<Scan the module name and make |cur_module| point to it@>;
+    case string: @<Scan a verbatim string@>;
+#ifdef DEBUG
+    case trace: tracing=*(loc-1)-'0'; continue;
+#endif DEBUG
+    case ascii_constant: @<Scan an ASCII constant@>;
+    case octal: @<Scan an octal constant@>;
+    case hex: @<Scan a hex constant@>;
+    default: return(c);
+  }
+}
+
+@ @<Scan an ASCII...@>=/*spider*/
+  id_first=loc;
+  if (*loc=='\\') loc++;
+  while (*loc!='\'') {
+    loc++;
+    if (loc>limit) {
+        err_print("! String didn't end"); loc=limit-1; break;
+    }
+  }
+  loc++;
+  return(ascii_constant);
+
+@ @<Scan an octal constant@>= {
+  id_first=loc;
+  while ('0'<=*loc && *loc<'8') loc++;
+  id_loc=loc;
+  return(octal);
+}
+
+@ @<Scan a hex constant@>= {
+  id_first=loc;
+  while (isxdigit(*loc)) loc++;
+  id_loc=loc;
+  return(hex);
+}
+
+
+@ @<Scan the module name...@>= {
+  ASCII *k; /* pointer into |mod_text| */
+  @<Put module name into |mod_text|@>;
+  if (k-mod_text>3 && strncmp(k-2,"...",3)==0) cur_module=prefix_lookup(mod_text+1,k-3);
+  else cur_module=mod_lookup(mod_text+1,k);
+  if (cur_module_char=='(') {
+	@<If it's not there, add |cur_module| to the output file stack, or
+	      complain we're out of room@>@;
+  }
+  return(module_name);
+}
+
+@ Module names are placed into the |mod_text| array with consecutive spaces,
+tabs, and carriage-returns replaced by single spaces. There will be no
+spaces at the beginning or the end. (We set |mod_text[0]=' '| to facilitate
+this, since the |mod_lookup| routine uses |mod_text[1]| as the first
+character of the name.)
+
+@<Set init...@>=mod_text[0]=' ';
+
+@ @<Put module name...@>=
+k=mod_text;
+while (1) {
+  if (loc>limit && get_line()==0) {
+    err_print("! Input ended in section name");
+@.Input ended in section name@>
+    loc=buffer+1; break;
+  }
+  c=*loc;
+  @<If end of name, |break|@>;
+  loc++; if (k<mod_text_end) k++;
+  if (c==' ' || c==tab_mark) {
+    c=' '; if (*(k-1)==' ') k--;
+  }
+*k=c;
+}
+if (k>=mod_text_end) {
+  printf("\n! Section name too long: ");
+@.Section name too long@>
+  ASCII_write(mod_text+1,25);
+  printf("..."); mark_harmless;
+}
+if (*k==' ' && k>mod_text) k--;
+
+@ @<If end of name,...@>=
+if (c==at_sign) {
+  c=*(loc+1);
+  if (c=='>') {
+    loc+=2; break;
+  }
+  if (ccode[c]==new_module) {
+    err_print("! Section name didn't end"); break;
+@.Section name didn't end@>
+  }
+  *(++k)=at_sign; loc++; /* now |c==*loc| again */
+}
+
+@ At the present point in the program we
+have |*(loc-1)=string|; we set |id_first| to the beginning
+of the string itself, and |id_loc| to its ending-plus-one location in the
+buffer.  We also set |loc| to the position just after the ending delimiter.
+
+@<Scan a verbatim string@>= {
+  id_first=loc++; *(limit+1)=at_sign; *(limit+2)='>';
+  while (*loc!=at_sign || *(loc+1)!='>') loc++;
+  if (loc>=limit) err_print("! Verbatim string didn't end");
+@.Verbatim string didn't end@>
+  id_loc=loc; loc+=2;
+  return(string);
+}
+
+@* Scanning a macro definition.
+The rules for generating the replacement texts corresponding to macros and
+\cee\ texts of a module are almost identical; the only differences are that
+
+\yskip \item{a)}Module names are not allowed in macros;
+in fact, the appearance of a module name terminates such macros and denotes
+the name of the current module.
+
+\item{b)}The symbols \.{@@d} and \.{@@f} and \.{@@u} are not allowed after
+module names, while they terminate macro definitions.
+
+\yskip Therefore there is a single procedure |scan_repl| whose parameter
+|t| specifies either |macro| or |module_name|. After |scan_repl| has
+acted, |cur_text| will point to the replacement text just generated, and
+|next_control| will contain the control code that terminated the activity.
+
+@d app_repl(c) = {if (tok_ptr==tok_mem_end) overflow("token"); *tok_ptr++=c;}
+
+@<Global...@>=
+text_pointer cur_text; /* replacement text formed by |scan_repl| */
+eight_bits next_control;
+
+@ @u scan_repl(t) /* creates a replacement text */
+eight_bits t;
+{
+  sixteen_bits a; /* the current token */
+  int set_print_where;
+  if (t==module_name) {@<Insert the line number into |tok_mem|@>;}
+  /* avoid inserting line number in macro replacement texts */
+  /* |print_where| is both tested and set in |get_next| */
+  while (1) {
+      if (t==macro) {
+         print_where = 0;
+      }
+      a=get_next();
+      if (t==macro) {
+         set_print_where = print_where;
+      }
+      switch (a) {
+        @<In cases that |a| is a non-ASCII token (|identifier|,
+          |module_name|, etc.), either process it and change |a| to a byte
+          that should be stored, or |continue| if |a| should be ignored,
+          or |goto done| if |a| signals the end of this replacement text@>@;
+        default: app_repl(a); /* store |a| in |tok_mem| */
+      }
+  }
+  done: next_control=(eight_bits) a;
+  if (text_ptr>text_info_end) overflow("text");
+  if (t==macro) {
+	@<Strip trailing newlines from the replacement text@>;
+	}
+  cur_text=text_ptr; (++text_ptr)->tok_start=tok_ptr;
+  print_where = set_print_where;
+}
+
+@ We don't ever want a macro replacement text to end with newline, 
+but for readability of the {\tt WEB} source 
+we usually want the last token in a macro definition 
+to be a newline token.
+We can't just look for |@`\n'| at the end of the token list, because
+that might be the second half of a two-byte token, in which case it
+certainly {\em wouldn't} be a newline!
+So we look for a two-byte token (|*tok_ptr>=@'200|); as soon as we find one
+we've eliminated all trailing newlines.
+As long as we keep finding one-byte tokens, we drop trailing newlines
+as they come along.
+@<Strip trailing newlines...@>=
+tok_ptr -= 2;
+while (*tok_ptr<@'200 && *(tok_ptr+1)==@`\n') tok_ptr--;
+tok_ptr += 2;
+
+@ We use macros with zero or more parameters, and we give the parameters names.
+In order to scan a macro definition, we need to be able to substitute
+special markers for the parameter names.  
+We {\em don't} put the parameter names in the hash table, because they're
+strictly temporary.
+Instead we keep them in temporary storage:
+We allow macros to have up to 32 parameters using 256 text chars.
+
+@d max_param_name_texts = 256
+@d max_param_names = 32
+@<Global variables@>=
+ASCII param_name_texts[max_param_name_texts];
+ASCII *param_name_texts_end = param_name_texts+max_param_name_texts;
+ASCII * param_names[max_param_names]; /* pointers into |param_name_texts| */
+short next_param_name; /* first free spot in |param_names| */
+ASCII * next_param_name_text; /* first free spot in |param_name_texts| */
+
+@ @<Initialize the parameter name area@>=
+next_param_name=0;
+next_param_name_text=param_name_texts;
+param_names[next_param_name]=next_param_name_text;
+
+@ @<Set initial values@>=@<Initialize the parameter name area@>;
+
+@ @<Add identifier to parameter name list@>=
+@<Check for parameter name overflow@>;
+while (id_first<id_loc)
+	*next_param_name_text++=*id_first++;
+param_names[++next_param_name]=next_param_name_text;
+
+@ @<Check for parameter name overflow@>=
+if (next_param_name==max_param_names)
+	overflow ("parameter names");
+if (id_loc - id_first >
+	param_name_texts_end - next_param_name_text)
+    overflow ("parameter name texts");
+
+
+@ The function |parameter_number(first,loc)| returns |0| if the identifier
+is not a parameter, and the number of the parameter if it is a parameter.
+This is not the parameter number we'll store, because for storage we 
+want the {\em last} parameter to be {\tt \#1}, the penultimate to 
+be {\tt \#2}, and so on.
+This means we have to know the number of parameters only when constructing
+the replacement text, not when scanning the replacement text.
+@u
+int parameter_number(first, loc) 
+	ASCII *first, *loc;
+{
+	ASCII *f, *p;
+	int n;
+	for (n=0;n<next_param_name;n++) {
+		if (loc-first==param_names[n+1]-param_names[n]) { 
+				/* lengths match */
+			for(f=first,p=param_names[n];f<loc;)
+				if (*f++!=*p++) goto nomatch;
+			return n+1; /* matched parameter */
+		}
+    nomatch: continue; /* need |continue| to avoid syntax error! */
+	}
+	return 0; /* never matched anything */
+}
+			
+
+@ While scanning the macro name and parameter list, we ignore newlines.
+We initialize the parameter name area at the beginning, and again
+after scanning each replacement text.
+This makes sure we have an empty parameter name area when scanning the
+replacement text for a module.
+
+@<Scan a macro definition@>=
+@<Set |next_control| to the first non-newline token@>@;
+@<Take the macro name in |next_control|, put it in the hash table.
+	and set |p| to its entry in |name_dir|@>;
+@<Scan the parameter list (if any), 
+	and set |next_control| to the non-newline 
+	token following the parameter list@>;
+if (next_control!= @`=') {
+   err_print("! You must put an = sign before the macro replacement text");
+   @<Quit scanning the macro definition@>;
+}
+@<Trace macro name (|#ifdef TRACE_MACROS|)@>;
+app_repl(next_param_name); /* store number of parameters in |tok_mem| */
+scan_repl(macro);
+p->equiv=(ASCII *)cur_text;
+@<Trace equivalent text (|#ifdef TRACE_MACROS|)@>;
+@<Initialize the parameter name area@>;
+
+@ @<Trace macro name (|#ifdef TRACE_MACROS|)@>=
+#ifdef TRACE_MACROS
+if (tracing>1) {
+	printf("\nScanning definition of macro "); print_id(p);
+	}
+#endif TRACE_MACROS
+
+@ @<Trace equivalent text (|#ifdef TRACE_MACROS|)@>=
+#ifdef TRACE_MACROS
+if (tracing>2) {
+	printf("\nMacro "); print_id(p);
+	printf("'s replacement text is in text_info[%d]", cur_text-text_info);
+	}
+#endif TRACE_MACROS
+
+
+@ @<Scan the parameter list (if any), and set |next_control| to the
+	non-newline token 
+	following the parameter list@>=
+@<Set |next_control| to the first non-newline token@>@;
+if (next_control==@`(') {
+	do {
+		@<Get a parameter name@>;
+		@<Set |next_control| to the first non-newline token@>@;
+	} while (next_control==@`,');
+	if (next_control != @`)') {
+	  err_print("! Macro parameter list must end with )");
+	  @<Quit scanning the macro definition@>;
+	}
+	next_control=get_next(); /* first token following parameter list */
+}
+
+
+@ @<Take the macro name in |next_control|...@>=
+if (next_control!=identifier) {
+	err_print("! Macro name must be an identifier");
+@.Macro name must be an identifier@>
+	@<Quit scanning the macro definition@>;
+} else {
+	p = id_lookup(id_first,id_loc,macro);
+	if (p->ilk!=macro) {
+#ifdef WARN_USE_BEFORE_DEF
+		printf("\n! Warning: macro name ");
+		print_id(p);
+		printf(" was used before it was defined");
+		mark_harmless;
+#endif WARN_USE_BEFORE_DEF
+		p->ilk=macro;
+	} else if (p+1!=name_ptr) {
+		err_print ("! Macro name is multiply defined: ");
+	}
+}	
+
+@ @<Get a parameter name@>=
+@<Set |next_control| to the first non-newline token@>;
+if (next_control!=identifier) {
+	err_print("! Macro parameter name not an identifier");
+@.Macro parameter name...@>
+	@<Quit scanning the macro definition@>;
+} else {
+	if (parameter_number(id_first,id_loc)!=0) {
+		err_print("! Duplicate parameters in macro definition");
+@.Duplicate parameters...@>
+		@<Quit scanning the macro definition@>;
+	} else {
+		@<Add identifier to parameter name list@>;
+	}
+}
+
+
+@ @<Set |next_control| to the first non-newline token@>=
+while ((next_control=get_next())==@`\n');
+
+@ We modify this from the old tangle:
+
+@<In cases that |a| is a non-ASCII token (|identifier|,
+        |module_name|, etc.), either process it and change |a| to a byte
+        that should be stored, or |continue| if |a| should be ignored,
+        or |goto done| if |a| signals the end of this replacement text@>=
+case identifier: 
+  { short n;
+    if ((n=parameter_number(id_first,id_loc))!=0) {
+#ifdef TRACE_MACROS
+if(tracing>1) {
+    printf("\nIdentified "); ASCII_write(id_first,id_loc-id_first);
+    printf(" as parameter number %d (%d from back)",n,next_param_name-n+1);
+    }
+#endif TRACE_MACROS
+	app_repl(param); 
+	app_repl(next_param_name-n+1); /* reverses numbering */
+    } else { /* not a parameter */
+       a=id_lookup(id_first,id_loc,normal)-name_dir; 
+       app_repl((a / @'400)+@'200);  app_repl(a % @'400); 
+    }
+  }
+  break;
+case module_name: if (t!=module_name) goto done;
+  else {
+    @<Was an |at_sign| missed here?@>;
+    a=cur_module-name_dir;
+    app_repl((a / @'400)+@'250);
+    app_repl(a % @'400);
+    @<Insert the line number into |tok_mem|@>; break;
+  }
+case constant: case string:
+  @<Copy a string or verbatim construction or numerical constant@>;
+case ascii_constant:
+  @<Copy an ASCII constant@>;
+case octal:
+  @<Copy an octal constant@>; break;
+case hex:
+  @<Copy a hex constant@>; break;
+case @`\n':
+#ifdef NEWLINES_IN_MACROS
+   app_repl(a);
+#else
+   if (t==macro) continue;
+   else app_repl(a);
+#endif NEWLINES_IN_MACROS
+   break;  
+case definition: case format: case begin_unnamed: 
+  if (t!=module_name) goto done;
+  else {
+    err_print("! @@d, @@f and @@u are ignored in C text"); continue;
+@.{\AT!}d, {\AT!}f and {\AT!}u are ignored in C text@>
+  }
+case new_module: goto done;
+
+@ Here is the code for the line number: first a |sixteen_bits| equal
+to |@'150000|; then, if we're dealing with the change file, the line
+number plus |@'100000|; or, if we're dealing with the web file, the
+line number; or, if we're dealing with an include file, the number 0,
+then the line number, followed by the number of characters in the file
+name and the file name.
+
+@<Insert the line...@>=
+store_two_bytes(@'150000);
+if (changing) id_first=change_file_name;
+else id_first=cur_file_name;
+id_loc=id_first+strlen(id_first);
+if (changing) store_two_bytes((sixteen_bits)change_line);
+else store_two_bytes((sixteen_bits)cur_line);
+{int a=id_lookup(id_first,id_loc,normal)-name_dir; app_repl((a / @'400)+@'200);
+  app_repl(a % @'400);}
+
+@ @<Was an |at_sign|...@>= {
+  ASCII *try_loc=loc;
+  while (*try_loc==' ' && try_loc<limit) try_loc++;
+  if (*try_loc=='+' && try_loc<limit) try_loc++;
+  while (*try_loc==' ' && try_loc<limit) try_loc++;
+  if (*try_loc=='=') err_print ("! Nested named modules.  Missing @@?");
+@.Nested named modules@>
+}
+
+@ @<Copy a string...@>=
+  app_repl(a); /* |string| or |constant| */
+  while (id_first < id_loc) { /* simplify \.{@@@@} pairs */
+    if (*id_first==at_sign) id_first++;
+    app_repl(*id_first++);
+  }
+  app_repl(a); break;
+
+@ @<Copy an ASCII constant@>= {
+  int c;
+  if (*id_first==at_sign) {
+    c=xchr[*id_first++];
+    if (*id_first!=at_sign) err_print("! Double @@ within string");
+  }
+  else if (*id_first=='\\') {
+    id_first++;
+    switch (*id_first) {
+    case 't':c=@`\t';break;
+    case 'n':c=@`\n';break;
+    case 'b':c=@`\b';break;
+    case '0':c=@`\0';break;
+    case '\\':c=@`\\';break;
+    default: err_print("! Unrecognized escape sequence");
+    }
+  }
+  else c=xchr[*id_first];
+  app_repl(constant);
+/* we don't want octal; we want decimal */
+    /* we know |c<=255| */
+  app_decimal((long)c);
+  app_repl(constant);
+}
+break;
+
+@ Paranoia to work on any 32 bit integer machine...
+@<Copy an octal constant@>= {
+long sum=0;
+while (id_first<id_loc) {
+   sum = 8*sum + *id_first++ - '0';
+   if (sum > @"04000000) err_print("! Octal constant exceeds @@\"04000000");
+   }
+app_repl(constant);
+app_decimal(sum);
+app_repl(constant);
+} 
+
+@ @<Copy a hex constant@>= {
+long sum=0;
+while (id_first<id_loc) {
+   sum = 16*sum + 
+	(isdigit(*id_first) 
+		? *id_first - '0'
+		: isupper(*id_first) 
+			? *id_first - 'A' + 10
+			: *id_first - 'a' + 10
+	);
+   id_first++;
+   if (sum > @"04000000) err_print("! Hex constant exceeds @@\"04000000");
+   }
+app_repl(constant);
+app_decimal(sum);
+app_repl(constant);
+}
+
+@ This function prints out a decimal constant using |app_repl|.
+@u
+app_decimal(c)
+	long c; /* on entry require |c>=0| */
+{long power;
+	if (c==0) {app_repl('0'); return;}
+	if (c<0) /* should never happen */ {app_repl('-'); c = - c;} 
+	for (power=1; c>=power; power *=10);
+    /* now |power/10<=c<power| */
+	for (power /=10; power>=1; power /=10) {
+		app_repl('0'+c/power); /* leading digit $>0$ */
+		c%=power;
+		/* invariant: original c = this c + printed string*power */
+		}
+	}
+
+
+
+@* Scanning a module.
+The |scan_module| procedure starts when `\.{@@\ }' or `\.{@@*}' has been
+sensed in the input, and it proceeds until the end of that module.  It
+uses |module_count| to keep track of the current module number; with luck,
+\.{WEAVE} and \.{TANGLE} will both assign the same numbers to modules.
+
+@<Global...@>=
+extern sixteen_bits module_count; /* the current module number */
+
+@ The top level of |scan_module| is trivial.
+@u scan_module()
+{
+  name_pointer p; /* module name for the current module */
+  text_pointer q; /* text for the current module */
+  sixteen_bits a; /* token for left-hand side of definition */
+  module_count++;
+  if (*(loc-1)=='*') /* starred module */
+    printf("*%d",module_count); fflush(stdout);
+  @<Scan the definition part of the current module@>;
+  @<Scan the \cee\ part of the current module@>;
+}
+
+@ We define two kinds of ilks for identifiers: |normal| for ordinary
+identifiers, and |macro| for macros.
+@d normal = 0
+@d macro = 1
+@d simple = 2
+@<Scan the definition part...@>=
+next_control=0;
+while (1) {
+done_scanning:
+  while  (next_control<=format)
+     if ((next_control=skip_ahead())==module_name) { 
+					/* scan the module name too */
+         loc-=2; next_control=get_next();
+     }
+  if (next_control!=definition) break;
+  @<Scan a macro definition@>;
+  cur_text->text_link=0; /* |text_link=0| characterizes a macro */
+}
+
+@ We initialize the parameter name area at the beginning, and we re-initialize
+any time we have to punt a macro definition.
+This makes sure we have an empty parameter name area when scanning the
+replacement text for a module.
+@<Quit scanning the macro definition@>=
+@<Initialize the parameter name area@>;
+p->ilk=normal; /* turn off macro replacement and hope for the best */
+goto done_scanning;
+
+
+@ @<Scan the \cee...@>=
+switch (next_control) {
+  case begin_unnamed: p=name_dir; break;
+  case module_name: p=cur_module;
+    @<Check that |=| follows this module name, otherwise |return|@>;
+    break;
+  default: return;
+}
+@<Insert the module number into |tok_mem|@>;
+scan_repl(module_name); /* now |cur_text| points to the replacement text */
+@<Update the data structure so that the replacement text is accessible@>;
+
+@ @<Check that |=|...@>=
+while ((next_control=get_next())=='+'); /* allow optional `\.{+=}" */
+if (next_control!='=') {
+  err_print("! C text flushed, = sign is missing");
+@.C text flushed...@>
+  while ((next_control=skip_ahead()) != new_module);
+  return;
+}
+
+@ @<Insert the module number...@>=
+store_two_bytes((sixteen_bits)(@'150000+module_count)); /* |@'150000==@'320*@'400| */
+
+@ @<Update the data...@>=
+if (p==name_dir||p==0) { /* unnamed module, or bad module name */
+  (last_unnamed)->text_link=cur_text-text_info; last_unnamed=cur_text;
+}
+else if (p->equiv==(ASCII *)text_info) p->equiv=(ASCII *)cur_text;
+  /* first module of this name */
+else {
+  q=(text_pointer)p->equiv;
+  while (q->text_link<module_flag) q=q->text_link+text_info; /* find end of list */
+  q->text_link=cur_text-text_info;
+}
+cur_text->text_link=module_flag; /* mark this replacement text as a nonmacro */
+
+@ @u phase_one() {
+  phase=1;
+  module_count=0;
+  reset_input();
+  while ((next_control=skip_ahead())!=new_module);
+  while (!input_has_ended) scan_module();
+  check_complete();
+  phase=2;
+}
+
+@ @u print_stats() {
+  printf("\nMemory usage statistics:\n");
+  printf("%d names (out of %d)\n",name_ptr-name_dir,max_names);
+  printf("%d replacement texts (out of %d)\n",text_ptr-text_info,max_texts);
+  printf("%d bytes (out of %d)\n",byte_ptr-byte_mem,max_bytes);
+  printf("%d tokens (out of %d)\n",tok_ptr-tok_mem,max_toks);
+}
+
+@* Index.
+Here is a cross-reference table for the \.{TANGLE} processor.
+All modules in which an identifier is
+used are listed with that identifier, except that reserved words are
+indexed only when they appear in format definitions, and the appearances
+of identifiers in module names are not indexed. Underlined entries
+correspond to where the identifier was declared. Error messages and
+a few other things like ``ASCII code'' are indexed here too.

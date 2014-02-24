@@ -1,0 +1,368 @@
+#
+# Copyright 1989 by Norman Ramsey, Odyssey Research Associates
+#  modified for c++ by Ed Kademan <kademan@stat.wisc.edu>
+#  Thu Aug 10 12:47:13 CDT 1989
+# To be used for research purposes only
+# For more information, see file COPYRIGHT in the parent directory
+language C++ extension cc
+
+at_sign @
+
+comment begin <"//"> end newline
+
+default translation <*> mathness yes
+
+token identifier category simp mathness yes
+token number category math mathness yes
+token newline category newline mathness maybe translation <>
+token pseudo_semi category semi mathness maybe translation <"\\relax">
+
+module definition stmt use math
+
+token + category unorbinop
+token - category unorbinop
+token * category unorbinop translation <"{*}">
+token / category dot
+token < category less
+token > category greater
+token = category equals translation <"\\leftarrow"> tangleto <"="-space>
+token . category dot
+token ~ category unop translation <"\\TI">
+token & category unorbinop translation <"\\amp">
+token ^ translation <"\\^"> category binop
+token | category binop
+token ? translation <"\\?"> category question
+token % translation <"\\%"> category binop
+token # translation <"\\#"> category sharp
+token ! category unop translation <"\\neg">
+token \ category backslash translation <"\\backslash">
+token ( category open
+token ) category close
+token [ category open
+token ] category close
+token { translation <"\\{"-indent> category lbrace
+token } translation <"\\}"> category rbrace
+token , category comma translation <",\\;">
+token ; category semi
+token : category colon
+token :: category coloncolon translation <"\\CC">
+token ++ category unop translation <"\\PP">
+token -- category unop translation <"\\MM">
+token != translation <"\\I"> category binop
+token <= translation <"\\L"> category binop
+token >= translation <"\\G"> category binop
+token == translation <"\\S"> category binop
+token && translation <"\\W"> category binop
+token || translation <"\\V"> category binop
+token -> translation <"\\MG"> category binop
+token >> translation <"\\GG"> category binop
+token << translation <"\\LL"> category binop
+
+macros begin
+\def\CC{\mathrel{:{:}}}
+\def\CCE{\mathrel{:{:}=}}
+\def\FE{\mathrel{/=}}
+\def\PP{\mathord{++}}
+\def\PE{\mathrel{+=}}
+\def\MM{\mathord{--}}
+\def\ME{\mathrel{-=}}
+\def\MG{\mathrel{\to}}
+\def\GG{\mathrel{>\!>}}
+\def\LL{\mathrel{<\!<}}
+\def\TE{\mathrel{\ast=}}
+\def\CE{\mathrel{\%=}}
+\def\HE{\mathrel{\uparrow=}}
+\def\AE{\mathrel{\amp=}}
+\def\OE{\mathrel{|=}}
+\let\openbraces=\{
+\let\closebraces=\}
+\def\{{\ifmmode\openbraces\else$\openbraces$\fi}
+\def\}{\ifmmode\closebraces\else$\closebraces$\fi}
+\def\?{\mathrel?}
+\def\s{\ }
+\def\setfilefonts{\let\\=\. \let\|=\. \let\&=\.}
+macros end
+
+default translation <*-"\\"-space>
+
+ilk case_like category case
+ilk do_like category do
+ilk else_like category else
+ilk enum_like category enum
+ilk for_like category for
+ilk if_like category if
+ilk int_like category decl_head translation <*>
+ilk new_like category new
+ilk sizeof_like category sizeof
+ilk struct_like category struct
+ilk switch_like category switch
+ilk this_like category simp
+ilk typedef_like category typedef
+
+default translation <*>
+
+reserved asm ilk sizeof_like
+reserved auto ilk int_like
+reserved break ilk case_like
+reserved case ilk case_like
+reserved char ilk int_like
+reserved class ilk struct_like
+reserved const ilk int_like
+reserved continue ilk case_like
+reserved default ilk case_like
+reserved delete ilk this_like
+reserved do ilk do_like
+reserved double ilk int_like
+reserved else ilk else_like
+reserved enum ilk enum_like
+reserved extern ilk int_like
+reserved float ilk int_like
+reserved for ilk for_like
+reserved friend ilk int_like
+reserved goto ilk case_like
+reserved if ilk if_like
+reserved inline ilk int_like
+reserved int ilk int_like
+reserved long ilk int_like
+reserved new ilk new_like
+reserved operator ilk this_like
+reserved overload ilk int_like
+reserved private ilk case_like
+reserved protected ilk case_like
+reserved public ilk case_like
+reserved register ilk int_like
+reserved return ilk case_like
+reserved short ilk int_like
+reserved sizeof ilk sizeof_like
+reserved static ilk int_like
+reserved struct ilk struct_like
+reserved switch ilk switch_like
+reserved this ilk this_like
+reserved typedef ilk typedef_like
+reserved union ilk struct_like
+reserved unsigned ilk int_like
+reserved virtual ilk int_like
+reserved void ilk int_like
+reserved while ilk for_like
+
+# we indulge in a trick to avoid treating
+#	ASCII (*fp)(); 
+# as a statement (function call). We use instead
+#	ASCII ===> (*fp)();
+token ===> translation <"\\relax"> tangleto <space> category decl_head
+
+
+# 
+# There appears to be a bug in spidery weave.  If the very last line of a
+# web file ends with a preprocessor directive weave fails to print it out.
+# The first line below fixes this problem.
+preproc [ ignore_scrap ] --> preproc newline
+? ignore_scrap --> #1
+#  dropped, because we've overflowed yacc!     
+#### DON'T DO THIS!  it makes it impossible to add translation on the left
+#### ignore_scrap ? --> #2
+
+
+# because of declarations, we have to be very careful about converting
+# simp to math
+
+(math|simp) unop --> math
+math (binop|unorbinop) (math|simp) --> math
+math comma <opt-9> (math|simp) --> math
+# we're not allowed math simp --> statement because math simp could be fn_decl
+math math --> math
+(math|simp) semi --> stmt
+# so to hack the omission above, we include (usually a cast)
+math <"\\"-space> stmt --> stmt
+
+(open|simpopen|question|unop|unorbinop|case) [ simp ] --> (open|simpopen|question|unop|unorbinop|case) math
+[ simp ] binop --> math binop
+# old: 
+# [ simp ] equals --> math equals
+# math [ equals ] --> math binop
+
+simp* colon --> tag
+
+# can't have simp open --> open because that causes ( to eat all id's to its left.
+simp open --> simpopen
+
+(open|simpopen) math close --> math
+(open|simpopen) <"\\,"> close --> math
+# following needed for for statements
+open stmt <"\\"-space> --> open
+
+(new|simp|decl_head) <"\\"-space> decl_head --> decl_head
+[ simp ] math (equals|comma|semi) --> decl_head math (equals|comma|semi)
+[ (decl_head|simp) simp ] (simp|math) --> decl_head (simp|math)
+(simp|decl_head) <"\\"-space> (simp|math)* comma --> decl_head
+[ (simp|decl_head) <"\\"-space> (simp|math)* ] semi --> math semi
+(simp|decl_head) <"\\"-space> (simp|math)* equals --> decl_equals
+(open|simpopen) [ (simp|decl_head) <"\\"-space> (simp|math)* equals ] --> (open|simpopen) decl_equals
+decl_equals math comma --> decl_head
+[ decl_equals math ] semi --> math semi
+decl_equals [ simp ] --> decl_equals math
+
+# here we try to deal with casts and argument lists, e.g.
+#	(ASCII *) malloc(sizeof (ASCII *));
+#	char *malloc(int);
+
+# If the type is predefined, we know we have a cast
+(open|simpopen) decl_head close --> cast
+(open|simpopen) [ decl_head <"\\"-space> simp ] --> (open|simpopen) decl_head
+(open|simpopen) [ decl_head (unorbinop|math) ] --> (open|simpopen) decl_head
+(open|simpopen) decl_head comma --> arglist
+arglist (decl_head|unorbinop|math) --> arglist
+arglist <"\\"-space> simp --> arglist
+arglist comma --> arglist
+arglist close --> math
+
+# and here are some common cases of casts with non-predefined types
+# for other cases you'll have to use "declares"
+(open|simpopen) math <"\\"-space> unorbinop comma --> arglist
+(open|simpopen) math <"\\"-space> unorbinop unorbinop comma --> arglist
+(open|simpopen) math <"\\"-space> unorbinop unorbinop unorbinop comma --> arglist
+(open|simpopen) math <"\\"-space> unorbinop close --> cast
+(open|simpopen) math <"\\"-space> unorbinop unorbinop close --> cast
+(open|simpopen) math <"\\"-space> unorbinop unorbinop unorbinop close --> cast
+
+# the math here seems to be a cast.  We don't convert to cast because it looks
+# too much like a cycle
+(open|simpopen) [ math <"\\"-space> simp ] --> (open|simpopen) math
+
+# Here is the destiny of casts
+cast <"\\"-space> (math|simp) --> math
+cast (newline|ignore_scrap) --> cast
+cast --> math
+
+question math colon --> binop
+
+unop math --> math
+<"{"> unorbinop <"}"> math --> math
+<"\\buildrel"> (binop|unorbinop) <"\\over{"> equals <"}"> --> binop
+equals --> binop
+sizeof (math|simp) --> math
+
+struct simp* <"\\"-space> lbrace --> structbrace
+struct lbrace --> structbrace
+struct (simp|decl_head)* colon (simp|decl_head) lbrace --> structbrace
+struct (simp|decl_head)* colon case (simp|decl_head) lbrace --> structbrace
+structbrace [ simp ] --> structbrace decl_head
+structbrace <force> stmt --> structbrace
+structbrace <outdent-force> rbrace --> struct_head
+structbrace <outdent-force> tagged_stmt --> structbrace
+[ struct_head ] simp --> decl_head simp
+# some people say e.g. struct blah {...};    is this K&R?
+[ struct_head ] semi --> math semi
+struct [ simp (newline|ignore_scrap) ] --> struct simp
+struct simp --> decl_head
+decl_head <"\\"-space> struct --> struct
+
+# enumeration types are like structures and unions, but they have math
+# instead of many decls...
+enum simp* <"\\"-space> lbrace --> enumbrace
+enum lbrace  --> enumbrace
+enumbrace math rbrace <outdent> --> enum_head
+[ enum_head ] simp --> decl_head simp
+[ enum_head ] semi --> math semi
+enum [ simp (newline|ignore_scrap) ] --> enum simp
+enum simp --> decl_head
+decl_head <"\\"-space> enum --> enum
+
+typedef [ simp ] --> typedef decl_head
+typedef stmt --> stmt
+
+[ math* <indent> ] (lbrace|decl_head|stmt) --> fn_decl (lbrace|decl_head|stmt)
+[ (simp|decl_head) <"\\"-space> math* <indent> ] (lbrace|decl_head|stmt) --> fn_decl (lbrace|decl_head|stmt)
+# The following statment will always have braces and never be tagged
+fn_decl <outdent-force> stmt --> stmt
+math colon fn_decl --> fn_decl
+
+(open|simpopen) [ stmt <"\\"-space> stmt ] --> (open|simpopen) stmt
+
+lbrace <outdent-force> rbrace --> stmt
+lbrace <force> stmt --> lbrace
+lbrace <outdent-force> tagged_stmt --> lbrace
+lbrace (math|simp) <outdent> rbrace --> math
+
+# if math can be followed by a brace, or no.
+# ifmath and ifbrace can have an attached else or else if clause
+# else, for, and while are formatted like if, but can't have an
+# attached else clause, so we use formath and forbrace
+
+if math --> ifmath
+ifmath <"\\"-space> lbrace --> ifbrace
+ifbrace <force> stmt --> ifbrace
+ifbrace <outdent-force> tagged_stmt --> ifbrace
+ifbrace [ rbrace (newline|ignore_scrap) ] --> ifbrace rbrace
+ifbrace rbrace [ else (newline|ignore_scrap) ] --> ifbrace rbrace else
+ifbrace <outdent-force> rbrace <"\\"-space> else if --> if
+ifbrace <outdent-force> rbrace <"\\"-space> else lbrace --> forbrace
+ifbrace <outdent-force> rbrace <"\\"-space> else --> formath
+ifbrace <outdent-force> rbrace --> stmt
+
+# Assume simple statements attached to if will never be tagged
+
+ifmath [ stmt (newline|ignore_scrap) ] --> ifmath stmt
+ifmath stmt [ else (newline|ignore_scrap) ] --> ifmath stmt else
+ifmath <indent-force> stmt <outdent-force> else if --> if
+ifmath <indent-force> stmt <outdent-force> else lbrace --> forbrace
+ifmath <indent-force> stmt <outdent-force> else --> formath
+ifmath <indent-force> stmt <outdent> --> stmt
+
+for math --> formath
+formath <"\\"-space> lbrace --> forbrace
+forbrace <force> stmt --> forbrace
+forbrace <outdent-force> tagged_stmt --> forbrace
+forbrace <outdent-force> rbrace --> stmt
+formath <indent-force> stmt <outdent> --> stmt
+
+# we need an extra indent for switch, becuase the cases will be backed out
+switch math lbrace <indent> --> switchbrace
+switchbrace <outdent-force> tagged_stmt --> switchbrace
+# This next should never happen
+switchbrace <force> stmt --> switchbrace
+switchbrace <outdent-outdent-force> rbrace --> stmt
+
+
+
+# handle do-while (while has category for)
+do lbrace --> dobrace
+dobrace <force> stmt --> dobrace
+dobrace <outdent-force> tagged_stmt --> dobrace
+dobrace rbrace for --> math
+do <indent-force> stmt <outdent-force> for --> math
+
+case semi --> stmt
+case math semi --> stmt
+case colon --> tag
+case math colon --> tag
+tag <force> tag --> tag
+tag <indent-force> stmt --> tagged_stmt
+
+stmt <force> stmt --> stmt
+stmt <outdent-force> tagged_stmt --> stmt
+semi --> stmt
+
+# control sequence \8 puts things on the left margin
+<force-"\\8"> sharp <"{\\let\\\\=\\bf"-space> (simp|if|else) <"}"-indent-"{}"-space> --> preproc
+preproc backslash <force-"\\8\\hskip1em"-space> newline --> preproc
+preproc <force-outdent> newline --> ignore_scrap
+preproc !(less|lesssimp|backslash|newline) --> preproc
+newline --> ignore_scrap
+
+[ less (simp|decl_head) ] (dot|greater) --> lesssimp (dot|greater)
+lesssimp dot simp --> lesssimp
+<"{\\setfilefonts"-space> lesssimp greater <"}"> --> math
+lesssimp --> unop
+less --> binop
+greater --> binop
+dot --> binop
+
+
+(decl_head|simp) coloncolon (decl_head|simp) --> simp
+math coloncolon (decl_head|simp) --> math
+decl_head stmt --> stmt
+
+# The following handles "~" for destructors.
+coloncolon <"\\,"> unop --> coloncolon
+unop decl_head --> decl_head

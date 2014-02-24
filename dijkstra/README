@@ -1,0 +1,3 @@
+The spider file for Dijkstra's language of guarded commands isn't really
+very good.  One problem is that it's hard to come up with ASCII representations
+of the operators Dijkstra uses.  Suggestions will be appreciated.

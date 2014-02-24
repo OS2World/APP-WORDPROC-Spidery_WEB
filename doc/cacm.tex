@@ -1,0 +1,602 @@
+\documentstyle[11pt]{article}
+\title{Building a Language-Independent {\tt WEB}\thanks{This research
+has been sponsored in part by the USAF, Rome Air Development Center,
+under contract number F30602--86--C--0071.}}
+%\author{Norman Ramsey\\Department of Computer Science\\Princeton University}
+\author{Norman Ramsey\thanks{Current address: Department of Computer
+Science, Princeton University, Princeton, New Jersey 08544}%
+\\Odyssey Research Associates}
+
+\newcommand{\token}{\cstok}
+\def\sizedboxit#1#2{\vtop{\vbox{\hrule\hbox{\vrule\kern #2%
+    \vtop{\vbox{\kern #2\hbox{#1}}\kern #2}\kern #2\vrule}}\hrule}}
+\def\boxit#1{\sizedboxit{#1}{3pt}}
+\newcommand{\remark}{\marginpar}
+\def\remark#1{\marginpar{\footnotesize\it #1}}
+\def\cstok#1{\leavevmode\thinspace\hbox{\vrule\vtop{\vbox{\hrule\kern1pt
+        \hbox{\vphantom{\tt/}\thinspace{\tt#1}\thinspace}}
+      \kern1pt\hrule}\vrule}\thinspace} % control sequence token
+\def\ttok#1{\leavevmode\thinspace\hbox{\vrule\vtop{\vbox{\hrule\kern1pt
+        \hbox{\vphantom{\tt(j}\thinspace{\tt#1}\thinspace}}
+      \kern1pt\hrule}\vrule}\thinspace} % token
+\newcommand{\X}{}
+\def\X:#1\X{\mbox{$\langle${#1}$\rangle$}}
+
+\begin{document}
+\maketitle
+
+In the fall of~1987 I started planning the implementation of a 
+suite of tools for building verified Ada
+programs~\cite{ramsey:developing}.
+The first tool to be built was a
+verification condition generator, which was to be formally defined
+using the typed lambda calculus.  
+I was eager to include the definition with the code
+so that it would be easy to check the code's correctness.
+Using {\tt WEB} would have made this easy, but,
+unfortunately, the target programming language was 
+SSL (a language for specifying structure editors), and the only
+languages for which {\tt WEB} implementations were 
+available were  Pascal and~C. 
+
+Writing a new {\tt WEB} from scratch didn't make sense, so
+I decided to modify Silvio Levy's implementation of {\tt WEB}
+in~C~\cite{levy:cweb}, 
+to get a {\tt WEB} that would be written in C, but would read and
+write SSL code.
+From my previous experiences modifying {\tt WEB}, I knew that the
+most time-consuming job would be fine-tuning the grammar that  {\tt
+WEAVE} uses to prettyprint code.
+I believed I could make debugging that grammar a lot less painful
+if, instead of trying to make dozens of small modifications by hand, I
+ wrote a simple program, perhaps an AWK script, that would read 
+a description of the grammar and generate C~code for {\tt WEAVE}.
+That AWK script became {\tt SPIDER}, a program that turns language
+descriptions into C~code for {\tt TANGLE} and {\tt WEAVE}.
+I have used {\tt SPIDER} to generate {\tt WEB}s for C, AWK, SSL, Ada,
+and a couple of other languages.
+I won't go into the details of {\tt SPIDER}; instead, I'll try to
+describe what {\tt SPIDER} does to accomplish its mission, or 
+how to take the ``essence of {\tt WEB}'' and make it
+language-independent. 
+
+\medskip
+
+When using {\tt WEB}, a programmer writes a single source file, {\tt
+foo.{\tt web}}, that holds both code and documentation.
+{\tt TANGLE} and {\tt WEAVE} read that file.
+{\tt TANGLE} extracts
+the code from the {\tt WEB} file and rewrites it in a form suitable
+for compiling.
+{\tt WEAVE} passes the documentation parts to a document formatter
+({\TeX}), and prettyprints the code parts.
+The whole process is shown in Figure~\ref{instance}, for C~programs
+written in {\tt WEB}.
+The~{\S} represents files that have to be written by hand.
+{\sl Slant} type is used for the names of executable programs.
+{\sl CTANGLE} and {\sl CWEAVE} are the C-language versions of {\tt
+TANGLE} and {\tt WEAVE}, {\sl cc}~is a C~compiler, and {\sl ld}~is a
+loader. 
+
+\begin{figure}
+\caption{Processing a C~{\tt web} file}
+\label{instance}
+\footnotesize
+\setlength{\unitlength}{2pt}
+\begin{picture}(170,80)(0,-40)
+\tt
+\put(20,12.5){\makebox(0,0)[l]{\ \sl CTANGLE}}
+\put(20,-12.5){\makebox(0,0)[l]{\ \sl CWEAVE}}
+
+\put(0,-5){\framebox(30,10){foo.{\tt web}\smash{${}^{\S}$}}}
+\put(15,5){\vector(1,2){7.5}}
+\put(10,20){\framebox(30,10){foo.c}}
+\put(15,-5){\vector(1,-2){7.5}}
+\put(10,-30){\framebox(30,10){foo.tex}}
+
+\put(40,-25){\vector(1,0){20}}
+\put(50,-23.5){\makebox(0,0)[b]{\sl {\TeX}}}
+\put(60,-30){\framebox(30,10){foo.dvi}}
+\put(90,-25){\vector(1,0){20}}
+\put(100,-25){\makebox(0,0){\shortstack{\strut dvi\\\strut \rm driver}}}
+\put(110,-25){\makebox(0,0)[l]{\rm\strut \ Typeset documentation for
+{\tt foo}}}
+
+\put(40,25){\vector(1,0){20}}
+\put(50,26.5){\makebox(0,0)[b]{\sl cc}}
+\put(60,20){\framebox(30,10){foo.o}}
+\put(90,25){\vector(1,0){20}}
+\put(100,26.5){\makebox(0,0)[b]{\sl ld}}
+\put(110,25){\makebox(0,0)[l]{\rm\strut \ Executable \sl foo}}
+
+
+
+\end{picture}
+
+\hrule
+\end{figure}
+
+{\tt SPIDER} is used to construct {\em instances} of {\tt TANGLE} and
+{\tt WEAVE}, and these instances are used to process programs as
+shown in Figure~\ref{instance}.
+Code for the language-dependent parts of these instances is generated
+by {\tt SPIDER} when it 
+reads a language description file written by a {\tt WEB} designer.
+Figure~\ref{building} shows how instances of {\tt TANGLE} and {\tt
+WEAVE} are generated. 
+{\tt SPIDER} converts a hand-written description of a programming language
+into C~{\tt WEB} code for the language-dependent parts of {\tt TANGLE}
+and {\tt WEAVE}. 
+In Figure~\ref{building} the target programming language is a hypothetical
+``X,'' and the description file is called ``{\tt x.spider}.''
+{\tt CTANGLE} combines the code {\tt SPIDER} writes with the ``master
+copies'' of {\tt tangle.web} and {\tt weave.web}, which contain the
+language-independent parts of {\tt TANGLE} and {\tt WEAVE}.
+The result is C~source code for {\tt XTANGLE} and {\tt XWEAVE}.
+After that code is compiled and loaded with {\tt WEB}'s I/O code, the
+resulting executable versions of {\tt XTANGLE} and {\tt XWEAVE} can be
+used to process X-language programs written in {\tt WEB} format, as
+shown around the periphery of Figure~\ref{building}.
+
+
+The master copies of {\tt tangle.web} and {\tt weave.web} are about
+1800 and 3200 lines long, respectively.
+About one third of these lines are comments.
+To illustrate the other size, suppose X is the Ada programming language.
+The {\tt ada.spider} file is about 260 lines long, and from it {\tt
+SPIDER} generates 
+about 1400~lines of {\tt ADATANGLE} and {\tt ADAWEAVE}.
+About one tenth of these lines are comments.
+It is typical for {\tt SPIDER} to generate between $5n$ and $6n$ lines
+of C~{\tt WEB} code from an $n$~line language description.
+
+\begin{figure}
+\caption{Building and using an instance 
+of {\tt WEB} (for language X)}
+\label{building}
+\footnotesize
+\setlength{\unitlength}{2pt}
+\begin{picture}(215,115)(10,-55)
+\tt
+\put(185,-5){\framebox(30,10){x.spider\smash{${}^{\S}$}}}
+\put(185,0){\line(-1,0){20}}
+\put(174,1.5){\makebox(0,0)[b]{$\,$\sl SPIDER}}
+\put(165,0){\vector(-1,1){10}}
+\put(165,0){\vector(-1,-1){10}}
+
+\put(125,5){\framebox(30,10){xt.web}}
+\put(125,-15){\framebox(30,10){xw.web}}
+\put(125,25){\framebox(30,10){\shortstack{{\rm Master}\\tangle.{\tt web}}}}
+\put(125,-35){\framebox(30,10){\shortstack{{\rm Master}\\weave.{\tt web}}}}
+\put(125,-30){\line(-1,1){10}}
+\put(125,-10){\line(-1,-1){10}}
+\put(115,-20){\vector(-1,0){25}}
+
+\put(104,-18.5){\makebox(0,0)[b]{\scriptsize\sl CTANGLE}}
+
+\put(125,10){\line(-1,1){10}}
+\put(125,30){\line(-1,-1){10}}
+\put(115,20){\vector(-1,0){25}}
+
+\put(104,21.5){\makebox(0,0)[b]{\scriptsize\sl CTANGLE}}
+
+\put(60,15){\framebox(30,10){xtangle.c}}
+\put(60,-25){\framebox(30,10){xweave.c}}
+\put(60,-20){\vector(-1,0){20}}
+\put(50,-18.5){\makebox(0,0)[b]{\sl cc, ld}}
+\put(60,20){\vector(-1,0){20}}
+\put(50,21.5){\makebox(0,0)[b]{\sl cc, ld}}
+\put(38,20){\makebox(0,0)[r]{\sl XTANGLE}}
+\put(38,-20){\makebox(0,0)[r]{\sl XWEAVE}}
+
+\put(-6.25,-5){\framebox(30,10){foo.{\tt web}\smash{${}^{\S}$}}}
+\put(8.75,5){\vector(1,4){6.25}}
+\put(0,30){\framebox(30,10){foo.x}}
+\put(8.75,-5){\vector(1,-4){6.25}}
+\put(0,-40){\framebox(30,10){foo.tex}}
+
+\put(30,-35){\vector(4,-1){20}}
+\put(50,-48.75){\framebox(30,10){foo.dvi}}
+\put(80,-47.5){\vector(4,-1){20}}
+\put(100,-52.5){\makebox(0,0)[l]{\rm\strut \ Typeset documentation for
+{\tt foo}}}
+
+\put(30,35){\vector(4,1){20}}
+\put(50,38.75){\framebox(30,10){foo.o}}
+\put(80,47.5){\vector(4,1){20}}
+\put(100,52.5){\makebox(0,0)[l]{\rm\strut \ Executable \sl foo}}
+
+
+
+\end{picture}
+
+\hrule
+\end{figure}
+
+\medskip
+
+A {\tt WEB} program is a collection of ``sections,'' each of which has a
+documentation part, a definition part, and a code part.
+The documentation part describes what the section is supposed to do,
+and is intended to be processed by a formatter---my {\tt WEB}s use
+{\TeX}, which is especially convenient for mathematical symbols like
+those used in writing a formal semantics.
+The definition part contains macro definitions.
+Each macro may have parameters or not, as the programmer chooses.
+The code in the code part is a fragment of the whole program.
+It is called a ``module'' and can be named or unnamed.
+When the module is named, the module name ``stands for'' that code,
+just as a macro name stands for the code in its definition.
+The unnamed module is special; the code in the unnamed module is
+considered to be ``the program.''
+
+Figure~\ref{fragment} shows a fragment of a {\tt WEB} program; the
+fragment inverts an 
+EBCDIC-to-ASCII table to obtain an ASCII-to-EBCDIC table.
+The target programming language is C.
+One module, \X:Invert {\it to\_ascii}, producing {\it to\_ebcdic}\X,
+uses the code defined in the other, \X:Set ${\it
+to\_ebcdic}[i]\leftarrow {\it UNDEFINED\_CODE}$ for all $i$\X.
+The program, {\tt foo}, of which this fragment is a part, can be input
+to {\tt CTANGLE} and {\tt CWEAVE}, to produce {\tt foo.c} and {\tt
+foo.tex} respectively, as shown in Figure~\ref{instance}.
+
+\begin{figure}
+\caption{Table Inversion}
+\label{fragment}
+\begin{verbatim}
+@ The array |to_ascii| converts an EBCDIC code to 
+an ASCII code, or to |-1| if there is no ASCII 
+equivalent to the given code.
+@d UNDEFINED_CODE = -1
+@<Invert |to_ascii|, producing |to_ebcdic|@>=
+    @<Set |to_ebcdic[i]=UNDEFINED_CODE| for all |i|@>@;
+    for (i=0; i<256; i++)
+        if (to_ascii[i] != UNDEFINED_CODE)
+            to_ebcdic[to_ascii[i]]=i;
+
+@ @<Set |to_ebcdic[i]=UNDEFINED_CODE| for all |i|@>=
+    for (i=0; i<128; i++) to_ebcdic[i] = UNDEFINED_CODE;
+\end{verbatim}
+\hrule
+\end{figure}
+
+
+
+{\tt TANGLE}'s job is to take a  collection of sections and to
+produce a compilable program.
+{\tt TANGLE} reads all the sections, skipping the documentation parts
+completely, but storing the macro definitions from the definition parts
+and the module definitions from the code parts.
+After it has read all the sections, {\tt TANGLE} then
+writes out the code in the unnamed module.
+But whenever it encounters a module name in that code, instead of
+writing out the name, it writes out the code for which this name
+stands. 
+That code may itself contain module names, which are replaced with the
+code for which they stand, and so on until {\tt TANGLE} reaches code
+which contains no occurrences of module names.
+{\tt TANGLE} processes macros similarly, except that macros may
+have parameters (modules may not).
+
+As I've described it, the ``essence of tangling'' is
+language-independent. 
+In the full implementation of {\tt TANGLE} there are only a few
+language-dependent details, and almost all of them come up only in
+lexical analysis. 
+During its input phase, {\tt TANGLE} converts macro definitions and
+module definitions into token lists.
+%%%Every token is represented using either eight or sixteen bits.
+The major kinds of tokens are
+module name tokens, identifier tokens, and ordinary tokens.
+Identifier tokens may be expandable (when they are macro names) or
+unexpandable (when they are programming-language identifiers).
+Module name tokens are always expandable, and ordinary tokens are
+never expandable.
+{\tt TANGLE} uses a stack to write out the token list corresponding to
+the unnamed module, expanding expandable tokens as it goes.
+No token is ever expanded until the time comes to write that token on
+the output.
+
+To build the language-dependent part of {\tt TANGLE}, it is enough to
+tell {\tt TANGLE} how to tokenize the input and how to write out a
+token list.
+{\tt TANGLE} uses a ``lowest common denominator'' lexical analyzer to
+tokenize its input.
+The set of tokens recognized by this lexical analyzer is the union of
+the sets of legal tokens of many different languages.
+For example, different ways of delimiting string literals are
+recognized. 
+Identifiers may have underscores, even though some languages
+(e.g.~Pascal) may not permit underscores in identifiers, and others
+(e.g.~Ada) may not permit consecutive underscores in an identifier.
+In general, {\tt TANGLE} and {\tt WEAVE} do the right thing with legal
+programs, but they do not detect illegalities in a program.
+
+{\tt TANGLE}'s lexical analyzer recognizes a fixed set of tokens
+representing identifiers, string literals, and numeric literals.
+Any printable ASCII character which is not part of some other
+token forms a token all by itself.
+A {\tt WEB} builder can specify that certain strings should
+be treated as single tokens, and
+{\tt SPIDER} will convert the specifications into appropriate code for
+{\tt TANGLE}.
+For example, when building {\tt WEB} for~C, we tell {\tt SPIDER} 
+that the strings {\tt ++}, {\tt ==}, and {\tt \&\&} (and many others)
+should be treated as single tokens, by putting the statements
+\begin{quote}\tt
+token ++ ...\\
+token == ...\\
+token \&\&\ ...
+\end{quote}
+into the language description file, {\tt c.spider}.
+
+{\tt TANGLE} discards comments, rather than attempting to tokenize
+them.
+Comments are assumed to begin with a special string, and to end either
+with another string or with a newline.
+We specify C comment conventions by telling {\tt SPIDER}
+\begin{quote}\tt
+comment begin <"/*"> end <"*/">
+\end{quote}
+
+
+On output, {\tt TANGLE} converts tokens to text by inverting the
+process of lexical analysis, so, for example, the token \token{++} is
+written out as ``{\tt ++}''.
+{\tt TANGLE}'s output phase inserts white space between adjacent
+identifiers and numeric literals, but otherwise does not write white
+space.
+This can cause problems in some cases; for example, in older
+C~compilers the string 
+``{\tt =-}'' is ambiguous.
+We can solve this problem by telling {\tt SPIDER} to build a {\tt
+TANGLE} that uses the text 
+ ``{\tt =~}'' when writing the \token{=}:
+\begin{quote}\tt
+token = tangleto <"= ">
+\end{quote}
+
+In sum, we can make {\tt TANGLE} language-independent with almost no
+effort.
+We do this by using a lowest common denominator lexical analyzer whose
+only parameter is a description of comments, and by providing a way to
+fine-tune the way {\tt TANGLE} writes tokens.
+
+
+
+\medskip
+Unlike {\tt TANGLE}, {\tt WEAVE} does no rearranging of the sections;
+its job is to translate its input into a prettyprinted program
+listing.
+The documentation part of each section is simply copied to the output,
+but the definition and code parts are prettyprinted.
+{\tt WEAVE}'s output is handed to a document formatter, which is
+assumed to implement a prettyprinting algorithm like that described by
+Oppen~\cite{oppen:prettyprinting}.
+Since my {\tt WEB}s use {\TeX} as the document formatter, the back-end
+prettyprinting is implemented by {\TeX} macros.
+
+{\tt WEAVE} copies the documentation parts as texts, but it converts
+definition and code parts to token lists using the same lexical
+analyzer used by {\tt TANGLE}.
+{\tt WEAVE}'s part of the prettyprinting task (as distinct from
+{\TeX}'s part) is converting these token lists to streams of {\TeX}
+text, possibly with prettyprinting instructions intercalated between
+tokens. 
+If you like, {\tt WEAVE}'s job is to produce the input to Oppen's
+algorithm. 
+For simplicity, we'll discuss only three prettyprinting instructions:
+{\em indent} 
+(increase the level of indentation), {\em outdent} (decrease the level
+of indentation), and {\em force} (force a line break).
+
+We tell {\tt WEAVE} how to convert tokens to {\TeX} text by specifying
+a {\em translation} for each token.
+Suppose we want the C token \token{!=} to be printed as~``$\ne$'',
+which is produced by the {\TeX} text ``\verb+\ne+''.
+Then we write
+\begin{quote}
+\begin{verbatim}
+token != translation <"\\ne">
+\end{verbatim} 
+\end{quote}
+(Two backslashes appear in the translation because {\tt SPIDER} uses
+C~conventions for string literals.
+The angle brackets {\tt <...>}  delimit translations.)
+The default for translation is just as in {\tt TANGLE}, so if we want
+``{\tt +}'' on input to produce ``$+$'' on output we need not specify a
+translation for the token \token{+}.
+
+The process of deciding where to put line breaks and indentation is
+the most complicated part of {\tt WEAVE}.
+We have to do this based on the sequence of tokens we have, but the
+exact details of which token is where usually aren't needed to do
+prettyprinting.
+Hence we introduce the {\em scrap}, which abstracts away from the
+detail not needed to do prettyprinting.
+A scrap has two parts: the translation, which we have already seen,
+and the {\em category}, which
+ corresponds to a ``part of speech'' or a symbol in a grammar. 
+{\tt WEAVE} uses categories to decide where to put
+indentation and line breaks.
+Since there are usually many different tokens having the same category,
+prettyprinting is simplified enormously.
+
+{\tt WEAVE} begins processing a program fragment by tokenizing the
+fragment, then converting each token in the resulting token list into
+a scrap. 
+It then attempts to reduce the length of the resulting scrap list by
+combining adjacent scraps into a single scrap, possibly intercalating
+additional translations, which may include
+{\em indent}, {\em outdent}, and {\em force} instructions.
+The scraps are combined according to one of many {\em reduction rules}.
+{\tt WEAVE} decides which adjacent scraps are eligible to be reduced
+based only on the categories of the scraps and a knowledge of the
+reduction rules.
+The reduction rules are the productions of the {\em prettyprinting
+grammar}. 
+{\tt WEAVE}'s reductions of scraps are like the reductions done in
+bottom-up parsing. 
+
+To take an example, suppose that we want statements to be separated by
+line breaks.
+If we can guarantee that any scrap representing a statement has
+category {\tt stmt}, it will be enough to specify the reduction rule
+\begin{quote}\tt
+stmt <force> stmt --> stmt
+\end{quote}
+which says ``two adjacent {\tt stmt} scraps may be reduced to a single
+{\tt stmt} scrap by intercalating a forced line break between them.''
+
+So we tell {\tt WEAVE} how to prettyprint a language by telling
+how to assign a category to each token and how to combine scraps.
+Here's another example: the language of C~expressions.
+ Let {\tt math} be the category of expressions,
+{\tt binop} be the category of binary infix operators, and
+{\tt unop} be the category of both unary prefix and unary postfix
+operators.
+Here are some sample tokens:
+\begin{quote}
+\begin{verbatim} 
+token identifier category math
+token + category binop
+token - category binop
+token = category binop translation <"\\leftarrow">
+token == translation <"\\equiv"> category binop
+token ( category open
+token ) category close
+\end{verbatim}
+\end{quote}
+Notice we print the \token{=} token (assignment) as $\leftarrow$,
+whereas we print the \token{==}~token (comparison) as $\equiv$.
+This makes it a bit easier for us to see when a programmer has
+mistakenly used \token{=} instead of \token{==}.
+
+
+The prettyprinting grammar for C~expressions is:
+\begin{quote}
+\begin{verbatim}
+math binop math --> math
+math unop --> math
+unop math --> math
+open math close --> math
+\end{verbatim}
+\end{quote}
+Using this grammar, {\tt WEAVE} can take a long expression consisting
+of many scraps, and reduce it all to a single scrap of category {\tt
+math}. 
+
+What about an operator like ``{\tt *}'', which is both binary infix
+and unary prefix? 
+This does the job:
+\begin{quote}
+\begin{verbatim}
+token * category unorbinop
+unorbinop math --> math
+math unorbinop math --> math
+\end{verbatim}
+\end{quote}
+
+% No Note about context-sensitive reductions?
+
+There is a mechanism for assigning categories and translations to
+reserved words as well as to tokens, using slightly different syntax. 
+
+To give an idea of the complexity of the grammars, the grammar
+describing AWK uses 24~categories in 39~productions.
+The Ada grammar uses 40~categories in 65~productions, and the
+C~grammar uses 54~categories in 129~productions.
+
+\medskip
+
+{\tt SPIDER}-generated versions of {\tt TANGLE} and {\tt WEAVE} differ
+subtly from the originals written by Donald Knuth.
+The most important difference is that {\tt SPIDER}-generated {\tt WEB}
+is not self-contained: where Knuth's Pascal {\tt WEB} required only a
+Pascal compiler to bring up, {\tt SPIDER} would need a C~compiler and
+an AWK~interpreter to generate a Pascal {\tt WEB}, and a Pascal
+compiler for the resulting {\tt WEB} to be of any use.
+Other differences are minor; for example, Knuth's {\tt TANGLE}
+does arithmetic on constants at {\tt TANGLE} time, but {\tt
+SPIDER}-generated {\tt TANGLE}s do not.
+Knuth's {\tt TANGLE} provides three different kinds of macros, but
+none with more than one parameter;
+{\tt SPIDER}-generated {\tt TANGLE}s provide only one kind of macro,
+but macros of that kind may have from zero to thirty-two parameters.
+
+
+
+{\tt SPIDER} is a {\tt WEB} generator, akin to parser generators.
+Both read formal descriptions of some part of a programming language,
+and both produce code that processes programs written in that language.
+Since both produce code that is part of the ``compiler,'' using them
+doesn't introduce any extra steps into the processing of user programs.
+{\tt SPIDER} itself is a large AWK script, written as a {\tt WEB}
+program.  
+{\tt spider.web} is about 2600 lines long; about a third of these are
+comments. 
+
+
+The major cost of using {\tt SPIDER} is the cost of learning yet
+another language.
+Learning this language is supposed to substitute for learning how to
+modify {\tt WEB}, so it is probably not an exorbitant cost.
+Some other limitations are the the need for a C~compiler and an
+AWK~interpreter, and the need to use a lowest-common-denominator
+lexical analyzer. 
+
+The major benefit of using {\tt SPIDER} is the ease with which new
+{\tt WEB}s can be built.
+%\remark{(Here is the place to talk about Oberon.)}
+The {\tt SPIDER} description of a language is much smaller than the
+{\tt WEB} implementation generated from that description, and {\tt
+SPIDER} descriptions of similar languages are similar.
+Using {\tt SPIDER} one can build a {\tt WEB} without understanding the
+details of {\tt WEB}'s implementation, and one can easily adjust that
+{\tt WEB} to change as a language definition changes.
+%\remark{Could mention work with Larch/Ada-88}
+
+
+
+{\tt SPIDER}  should make one literate programming tool, {\tt WEB},
+available to a much larger audience.
+I hope that, by separating the language-independent parts of {\tt WEAVE}
+and {\tt TANGLE}, {\tt SPIDER} will  encourage us not just to think
+about what the essence of tangling and weaving is, but also about what
+the essence of literate programming is.
+
+
+\medskip
+
+I enjoyed many useful discussions of {\tt WEB} with Charlie Mills.
+I am grateful to
+Silvio Levy for providing his {\tt CWEB} as the basis for the
+``master copies'' of {\tt TANGLE} and {\tt WEAVE}, and to
+Dave Hanson for comments on an earlier version of this paper.
+
+\begin{thebibliography}{van~Knuth~999}
+\bibitem[Bentley~86]{bentley:lp}
+Jon L. Bentley, ``Programming Pearls,''
+{\sl Communications of the ACM} {\bf 29:5} (May~1986), 364--368, and
+{\bf 29:6} (June~1986), 471--483.
+\bibitem[Knuth~84]{knuth:literate-programming}
+Donald E. Knuth, ``Literate Programming,'' {\sl The Computer Journal}
+{\bf 27:2}(1984), 97-111.
+\bibitem[Levy~87]{levy:cweb}
+Silvio Levy, ``{\tt WEB} Adapted to C, Another Approach,''
+ {\sl TUGBoat} {\bf 8:1}(1987), 12--13.
+\bibitem[Oppen~80]{oppen:prettyprinting}
+Derek Oppen, ``Prettyprinting,'' TOPLAS~{\bf 2:4} (October 1980),
+465--483. 
+\bibitem[Ramsey~89]{ramsey:developing}
+Norman Ramsey, ``Developing Formally Verified Ada Programs,''
+Proceedings, {\sl Fifth International Workshop on Software
+Specification and Design}, to appear.
+\bibitem[Van~Wyk~87]{cvw:loom}
+Christopher J. Van~Wyk, ``Literate Programming,''
+{\sl Communications of the ACM} {\bf 30:7} (July~1987), 593--599, and
+{\bf 30:12} (December~1987), 1000--1010.
+\end{thebibliography}
+
+\end{document}

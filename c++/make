@@ -1,0 +1,3 @@
+#!/bin/csh -f
+/bin/make -f ../master/WebMakefile CPUTYPE=`cputype`\
+ THETANGLE=c++tangle THEWEAVE=c++weave SPIDER=c++.spider $*

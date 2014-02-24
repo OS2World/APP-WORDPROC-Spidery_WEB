@@ -1,0 +1,84 @@
+ 8 Apr 89	Forgot to move object files to $(OBDIR) when making `boot'
+ 8 Apr 89	TANGLE token numbers were too low by 3.  This caused a
+		duplicate case in switch when there were too many tokens,
+		because some token was getting decimal 10 (#'13).  The
+		fix was to add 3 to the appropriate place in spider.web
+
+===> Bundled 8 Apr 89; all bugs into patches/001
+
+10 Apr 89	Confusion about Makefile targets; updated Makefile & README
+
+===> Bundled 10 Apr 89; all bugs into patches/002
+
+10 Apr 89	Bad figure in cacm.tex
+11 Apr 89	Make clean and distribution removed important source
+		from master directory.
+11 Apr 89	WEAVE itself doesn't WEAVE properly because of foul
+		comments in grammar.web.  Changed spider.web to escape
+		_ and # as well as |.
+11 Apr 89	spiderwebman.tex had a missing \endnewstuff.  While
+		putting it in I found some inaccuracies about macros.
+		The whole spiderwebman is pretty grim, and should be
+		rewritten, or at least checked for accuracy.
+
+===> Bundled 11 Apr 89; all bugs into patches/003
+
+14 Apr 89	Removed @\ from WEAVE; it was already gone from TANGLE
+		and is obsolete in Spidery WEB.
+		Marked documentation to show @? isn't supported.
+
+
+===> Bundled 18 Apr 89; all bugs into patches/004
+
+26 Jun 89	Removed \eject from webkernel.tex line 221 (before first page)
+		It was causing the headings on page 1 to come out missing.
+ 3 Jul 89	Added parentheses to 3 offending sprintf calls in spider.web
+
+===> Bundled 3 Jul 89; all bugs into patches/005
+
+20 Jul 89	WEAVE was erroneously matching scraps with category zero.
+		This was tickled in ceeweave by the name @<Oink |#include|s@>.
+		Grabbing the scrap with category zero caused WEAVE to drop
+		the text associated with the whole sequence.  I don't know
+		why it didn't go off the trolley entirely.
+		Fix was to put in a zero check for negations (single and
+		lists) and wild cards.
+
+===> Bundled 8 Aug 89; all bugs into patches/006
+
+23 Aug 89	Spider wouldn't accept capital letters in category and field
+		names.
+
+===> Bundled 14 Sep 89; all bugs into patches/007
+
+29 Nov 89	Ceetangle rewrote `a = b / *p' as `a= b/*p', a phony comment.
+		Fixed by `token * tangleto <space-"*">' (changing / mucks up
+		#include files)
+
+29 Nov 89	Updated README file to mention . in front of path, clear
+		up some misconceptions, and fix my telephone number.
+		Added Wayne Sewell's book to bibliographies.
+
+===> Bundled 29 Nov 89; all bugs into patches/008
+
+22 Jan 90	WebMakefile bombed if $(OBDIR) directory didn't exist.
+23 Jan 90	Got a letter from David Ness, indicating some changes for
+		MS-DOS version (also some bug fixes to spider.web).
+		I integrated his changes by introducing longs where
+		appropriate and adding a couple of `#ifdef MSDOS' lines.
+
+===> Bundled 02 Feb 90; all bugs into patches/009
+
+13 Feb 90	David Ness reports some \& should be \amp in macro definitions
+16 Apr 90	larch spider specification had old-style comment defns
+16 Apr 90	\write\cont{\string\catcode`\string\@=11} misplaced 
+		in webkernel.tex
+16 Apr 90	Give ** operator a translation in ada.spider
+11 Sep 90	Various bug fixes in webkernel.tex (from G. Alexander)
+
+
+===> Bundled 26 Sep 90; no patches for most bugs, some in patches/010
+
+19 Feb 91	Sequence @i wasn't in the manual.
+
+===> Bundled 19 Feb 91; no patches.

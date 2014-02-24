@@ -1,0 +1,4 @@
+#define in code should be done verbatim, otherwise trouble with
+parentheses....
+
+===> to force declaration.

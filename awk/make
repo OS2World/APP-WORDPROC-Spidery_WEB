@@ -1,0 +1,2 @@
+/bin/make -f ../master/WebMakefile CPUTYPE=`cputype`\
+ THETANGLE=awktangle THEWEAVE=awkweave SPIDER=awk.spider $*

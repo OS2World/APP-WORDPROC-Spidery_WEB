@@ -1,0 +1,149 @@
+% Copyright 1989 by Norman Ramsey, Odyssey Research Associates
+% To be used for research purposes only
+% For more information, see file COPYRIGHT in the parent directory
+
+\documentstyle[11pt]{article}
+\title{A note about a new implementation of {\tt WEB}}
+\author{Norman Ramsey\\Odyssey Research Associates}
+\date{July 4, 1988}
+\setcounter{secnumdepth}{0}
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Literate programming has received recent attention in the {\sl
+Communications of the ACM}~\cite{bentley:lp,cvw:loom}. 
+{\tt WEB} is a tool intended for literate programming, but 
+until recently it was  useful only for writing PASCAL programs.
+The author has developed a new tool, {\tt SPIDER}, which reads a
+description of a programming language and writes a {\tt WEB} system
+that can be used to write programs in that language.
+{\tt SPIDER} has been used in the author's organization to build {\tt
+WEB} systems for Ada, C, AWK, and other languages.
+The author hopes that {\tt SPIDER} will enable people to write
+literate programs in many more languages than they could before.
+\end{abstract}
+
+
+\section{Introduction}
+Donald Knuth developed the {\tt WEB} system of structured documentation 
+as part of the {\TeX} project~\cite{knuth:literate-programming}.
+His implementation of {\tt WEB} combined PASCAL and {\TeX}.
+  The {\tt WEB} idea suggests a way of combining {\em any}
+programming language with {\em any} document formatting language,
+but until recently there was no software support for writing in {\tt
+WEB} anything but PASCAL programs.
+In~1987, Silvio Levy rewrote the {\tt WEB} system in C for C,
+while retaining {\TeX} as the formatting language~\cite{levy:cweb}.
+I have has modified Levy's implementation by removing the parts
+that  make C the target programming language, and I have
+ added a third tool, {\tt SPIDER}, which complements {\tt WEAVE}
+and {\tt TANGLE}.
+{\tt SPIDER} reads a description of a programming language, and writes
+source code for a {\tt WEAVE} and {\tt TANGLE} which support that
+language. 
+Using {\tt SPIDER}, a C~compiler, and an AWK~interpreter, an experienced
+systems programmer can generate in a few hours a {\tt WEB} system for
+an Algol-like language.
+
+\section{Features of Spidery {\tt WEB}}
+An exhaustive list of Spidery {\tt WEB}'s features would interest only
+{\tt WEB} experts, 
+but I do want to mention some features that I hope will encourage
+people to use Spidery {\tt WEB}.
+\begin{itemize}
+\item
+{\tt TANGLE} and {\tt WEAVE} can read from multiple files (this
+feature is present in Levy's {\tt CWEB}), and
+{\tt TANGLE} can write to multiple files.
+Included files will be searched for on a path if not found in the
+current directory.
+These features make Spidery {\tt WEB} more usable on systems that have
+{\tt make}.
+\item
+{\tt TANGLE} can expand macros with multiple parameters.
+\item
+The starred sections in Spidery {\tt WEB} can be organized
+hierarchically (in three levels).
+We have a UNIX tool that can extract different pieces of the hierarchy
+from the output of {\tt WEAVE}, so that it is possible to take
+excerpts from {\tt WEB} documents.
+\item
+{\tt TANGLE} writes {\tt \#line} directives, so you can debug at the
+{\tt WEB} source level if your compiler respects the C~conventions for
+{\tt\#line}.
+\item
+Many features of {\tt WEB} seem to exist only to compensate for
+deficiencies in PASCAL, and most of those were dropped in {\tt CWEB}.
+I have changed much of {\tt CWEB} in order to avoid being bound too
+much by C conventions.
+As a result, there are dozens of minor differences between Spidery
+{\tt WEB} and original {\tt WEB}.
+To give just one example, Spidery {\tt WEB} supports
+octal and hexadecimal constants using {\tt WEB}-style
+notation, not the C~notation used in {\tt CWEB}.
+\end{itemize}
+
+\section{Scope of {\tt SPIDER}}
+{\tt SPIDER} can generate {\tt WEB} systems for a variety
+of languages.
+The author has written {\tt SPIDER} description files for C, AWK, Ada,
+SSL (a language that describes attribute grammars to the
+Cornell Synthesizer Generator), 
+the Larch Shared Language (a language for describing equational
+theories), 
+and Dijkstra's language of guarded commands.
+Debugging the grammar that {\tt WEAVE} uses to
+prettyprint the language is the most time-consuming part of creating a
+{\tt WEB} system for a new target language,
+and {\tt SPIDER} makes it trivial to change that grammar.
+To make a {\tt SPIDER} description file for an Algol-like language
+that uses infix expression notation, an experienced systems programmer
+should be able to adapt an existing {\tt SPIDER} description file very
+quickly.
+
+{\tt SPIDER}'s major limitations are lexical.
+ All Spidery {\tt WEB}s
+assume that spaces and tabs in the input are not significant, except
+as separators;
+this makes it impossible to construct Spidery {\tt WEB}s for languages
+like Fortran and Miranda, where the position of text on a line is
+significant.
+The lexical structures of identifiers, string literals, and numeric
+literals are fixed.
+
+\section{Conclusions}
+{\tt SPIDER} is a modest piece of engineering; it does not introduce
+new ideas.
+{\tt SPIDER}  does make it possible to create a new {\tt WEB} quickly,
+and to tinker with it easily.
+The author's group routinely uses Spidery {\tt WEB} to write programs
+in Ada, C, and~SSL, and has been pleased with the result.
+We have written in {\tt WEB} an application of eighteen thousand
+lines, and
+we are very pleased at how easy it has been to review and maintain
+this code.
+The author hopes that the availability of Spidery {\tt WEB} will
+encourage other groups to try literate programming, and that they,
+too, will be pleased with the results.
+
+
+
+\begin{thebibliography}{Van~Wyk~9999}
+\bibitem[Bentley~86]{bentley:lp}
+Jon L. Bentley, ``Programming Pearls,''
+{\sl Communications of the ACM} {\bf 29:5} (May~1986), 364--368, and
+{\bf 29:6} (June~1986), 471--483.
+\bibitem[Knuth~84]{knuth:literate-programming}
+Donald E. Knuth, ``Literate Programming,'' {\sl The Computer Journal}
+{\bf 27:2} (1984), 97--111.
+\bibitem[Levy~87]{levy:cweb}
+Silvio Levy, ``{\tt WEB} Adapted to C, Another Approach,''
+ {\sl TUGBoat} {\bf 8:1} (1987), 12--13.
+\bibitem[Van~Wyk~87]{cvw:loom}
+Christopher J. Van~Wyk, ``Literate Programming,''
+{\sl Communications of the ACM} {\bf 30:7} (July~1987), 593--599, and
+{\bf 30:12} (December~1987), 1000--1010.
+\end{thebibliography}
+
+\end{document}

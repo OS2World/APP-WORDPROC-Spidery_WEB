@@ -1,0 +1,2576 @@
+% Copyright 1989 by Norman Ramsey, Odyssey Research Associates
+% To be used for research purposes only
+% For more information, see file COPYRIGHT in the parent directory
+
+\message{OK, entering \string\batchmode...}
+\batchmode
+
+\let\RA\rightarrow
+
+\def\vert{{\tt\char'174}}
+\def\pb{$\.|\ldots\.|$} % C brackets (|...|)
+
+\def\title{SPIDER}
+
+\def\topofcontents{\null\vfill
+  \titlefalse % include headline on the contents page
+  \def\rheader{\hfil}
+  \centerline{\titlefont The {\ttitlefont SPIDER} processor}
+  \vfill}
+
+
+\def\syntax##1{\leavevmode\hbox{$\langle\hbox{\sl ##1\/}\rangle$}}
+\def\produces{\leavevmode\hbox{${}::={}$}}
+\def\opt##1{$[$##1$]$}
+
+#*={\tt SPIDER} proper.
+#*Introduction.
+This is an AWK program designed to read a description of a programming
+language and to write out the language-dependent parts of WEB.
+In the main,
+the description of a programming language is 
+ a list of all the tokens of the language 
+(together with various facts about them) and a grammar for prettyprinting
+code fragments written in that language.
+The ``Spider User's Guide'' describes how to use {\tt SPIDER} to construct 
+a {\tt WEB} system for the ALGOL-like language of your choice.
+({\tt SPIDER} may be able to handle LISP and Miranda and other strange 
+languages; the experiment hasn't been tried.
+The unusual lexical requirements of FORTRAN are probably beyond it, at 
+least until the lexical analysis is modernized.)
+
+# The outline of the program is fairly straightforward.
+We use |exitcode| throughout to monitor error status.
+If we were more Knuthlike, we would have a |history| variable with values of 
+|spotless|, and so on.
+This will have to wait until we get macros back into \.{TANGLE}.
+
+We put the pattern-action statement for productions last, because in
+case of a conflict like \.{token~-->~...}, we want the interpretation
+as {\tt token} to win out over
+the interpretation as a prodution.
+
+#u#1
+BEGIN {
+#<Set initial values#>
+exitcode=0
+}
+#@
+#<Ignore comments and blank lines#>
+#<Pattern-action statements#>
+#<Production pattern-action statement#>
+#<Default action for patterns we don't recognize#>
+#@
+END {
+#<Write out all of the WEB code#>
+print "Writing out lists" > logfile
+#<Write lists of everything#>
+#<Write statistics for this \.{SPIDER}#>
+#<Check for errors at the very end#>
+if (exitcode != 0) {
+	exit exitcode
+	}
+}
+
+# There are a couple of actions we may want to perform with just
+about any command.
+If a command fails, we move on to the next, but we remember the fault
+so we can complain at the end.
+#<Punt this command#>=
+	exitcode=-1
+	next
+
+
+# Throughout \.{SPIDER} we always use the variable |i| to step through the 
+fields of a  command, so that |$i| is always the next field of interest.
+When we thinik we have finished a command, 
+we will always want to check to make sure there are no unexamined
+fields left over.
+#<Check that we used everything#>=
+	if (i<=NF) {
+		print "Error: leftover fields", $i, "... on line", NR
+		#<Punt...#>
+		}
+
+
+# To \.{SPIDER}, any line beginning with |"## "| is a comment.
+\.{SPIDER} also ignores blank lines.
+#<Ignore comments...#>=
+#=/^##|^ *$/#> {
+	## comments, blank lines
+	print $0 > logfile
+	next
+	}
+
+# But, if \.{SPIDER} encounters a line we don't recognize, it complains.
+#<Default act...#>=
+	{
+	print "Warning: I don't know what to do with this line:"
+	print "        ", $0
+	print "Warning: I don't know what to do with this line:" > logfile
+	print "        ", $0 > logfile
+}
+
+
+#*1Files written by {\tt SPIDER}.
+ {\tt SPIDER} writes output to a number of files.
+Because 4.3~BSD AWK is limited in the number of files it can write at
+one time, there is substantial overlap.
+Here is a table:
+\noindent\halign{\vrule height10pt depth3.5pt width0pt
+\it##\hfil\tabskip=1em&\tt##\hfil&\tabskip=0pt
+	\hsize=4in\vtop{\noindent##\strut\par}\cr
+\noalign{\medskip}
+\bf Internal Name&\bf External Name&\omit\bf Description\hfil\cr
+\noalign{\smallskip}
+categoryfile&names.unsorted&
+names of categories, to be checked for duplicates by {\tt nodups.awk}
+\cr
+cycles&cycle.test&
+potential cycles, to be checked by {\tt cycle.web}
+\cr
+grammarfile&grammar.web&
+grammar; included in {\tt weave.web}
+\cr
+ilkfile&names.unsorted&
+names of ilks, to be checked for duplicates by {\tt nodups.awk}
+\cr
+logfile&spider.slog&
+log file, to be consulted when things go wrong
+\cr
+macrofile&*web.tex&
+language specific macro file, {\tt\string\input} by all \TeX{} 
+	files created by {\tt weave.web}
+\cr
+productions&productions.list&
+list of the productions (numbered) used in debugging \.{WEAVE}
+\cr
+reserved&scraps.web&
+code for converting the reserved word to scraps.
+{\tt scraps.web} is included by {\tt weave.web}
+\cr
+scrapfile&scraps.web&
+code for converting tokens to scraps.
+{\tt scraps.web} is included by {\tt weave.web}
+\cr
+tlang&outtoks.web&
+Information about what language we're webbing.
+{\tt outtoks.web} is included by {\tt tangle.web}.
+\cr
+tokennamefile&names.unsorted&
+list of names of all the tokens, to be checked by {\tt nodups.awk}
+\cr
+translationfile&trans\_keys.unsorted&
+list of names of all the translation keywords.
+Checked for duplicates by {\tt nodups.awk}, and also for recognizability
+by {\tt transcheck.awk}.
+\cr
+ttokfile&outtoks.web&
+This is the tokenization code for {\tt TANGLE}.
+\cr
+wlang&scraps.web&
+Information about what language we're webbing,
+{\tt scraps.web} is included by {\tt weave.web}.
+\cr
+}
+
+# Every action writes information to a log file.
+This log file can be used to check up on what happened.
+#<Set initial...#>=
+	logfile = "spider.slog"
+
+# Here we write the names of the key words used in translations.
+#<Set initi...#>=
+	translationfile = "trans_keys.unsorted"
+
+#  We write tokens out to two files: |scrapfile| for \.{WEAVE}, and
+|ttokfile| for \.{TANGLE}.
+#<Set init...#>=
+	scrapfile = "scraps.web"
+	print "@*Scrap code generated by {\\tt SPIDER}." > scrapfile
+	ttokfile = "outtoks.web"
+	print "@*Token code generated by {\\tt SPIDER}." > scrapfile
+# The reserved word stuff gets a file of its own, or it would in an ideal 
+world.
+#<Set init...#>=
+	reserved = "scraps.web" ## use same file; not enough files
+
+# We'll also end up writing a list of token names, for name checking
+purposes.
+#<Set initial...#>=
+	tokennamefile = "names.unsorted" ## cut down on number of output files
+# We also write out every ilk, so we'll be able to look for name
+clashes with translations and so on.
+#<Set init...#>=
+	ilkfile = "names.unsorted" ## cut down  on number of output files
+# We also write all the category names to a separate file, so we can
+check for duplicates later.
+#<Set init...#>=
+	categoryfile = "names.unsorted" ## cut down  on number of output files
+# We use a special file to write grammar information:
+#<Set init...#>=
+	grammarfile = "grammar.web"
+	print "@*Grammar code generated by {\\tt SPIDER}." > grammarfile
+# We use the language information to write banners and macro information.
+We combine this with other  stuff because AWK can't handle more than
+10 output files.
+#<Set initial...#>=
+	tlang = "outtoks.web" ## same as ttokfile
+	wlang = "scraps.web" ## same as scrapfile
+
+# We will write a list of the successfully parsed productions to a
+separate file.
+#<Set init...#>=
+	productions = "productions.list"
+
+# These productions will get fed to {\tt cycle.awk}, which looks for cycles.
+#<Set initial...#>=
+	cycles = "cycle.test"
+
+
+
+#*Processing translations.
+Translations tell \.{WEAVE} or \.{TANGLE} what to write out in
+particular circumstances (e.g.~after scanning a particular token, or 
+when firing some production).
+They are described at some length in the ``\.{SPIDER} User's Guide.''
+Translations are enclosed in angle brackets and separated by dashes.
+They can contain key words, digits, the self marker~`{\tt*}',
+or quoted strings.
+Since we can't put a space or dash into strings, we allow the use of
+key words |space| and |dash| to stand for those symbols.
+#^space#>
+#^dash#>
+
+Other key words are interpreted by \.{WEAVE} as prettyprinting instructions:
+
+\yskip\hang |break_space| denotes an optional line break or an en space;
+
+\yskip\hang |force| denotes a line break;
+
+\yskip\hang |big_force| denotes a line break with additional vertical space;
+
+\yskip\hang |opt| denotes an optional line break (with the continuation
+line indented two ems with respect to the normal starting position)---this
+code is followed by an integer |n|, and the break will occur with penalty
+$10n$;
+
+\yskip\hang |backup| denotes a backspace of one em;
+
+\yskip\hang |cancel| obliterates any |break_space| or |force| or |big_force|
+tokens that immediately precede or follow it and also cancels any
+|backup| tokens that follow it;
+
+\yskip\hang |indent| causes future lines to be indented one more em;
+
+\yskip\hang |outdent| causes future lines to be indented one less em.
+
+\yskip\hang |math_rel|, |math_bin|, and |math_op| will be translated into
+\.{\\mathrel\{}, \.{\\mathbin\{}, and  \.{\\mathop\{}, respectively.
+
+
+\yskip\noindent All of these tokens are removed from the \TeX\ output that
+comes from programming language text between \pb\ signs; |break_space| 
+and |force| and 
+|big_force| become single spaces in this mode. 
+%The translation of other
+%program texts results in \TeX\ 
+%control sequences \.{\\1}, \.{\\2},
+%\.{\\3}, \.{\\4}, \.{\\5}, \.{\\6}, 
+%\.{\\7} corresponding respectively to
+%|indent|, |outdent|, |opt|, 
+%|backup|, |break_space|, |force|, and
+%|big_force|. However, 
+A sequence of consecutive `\.\ ', |break_space|,
+|force|, and/or |big_force| tokens is first replaced by a single token
+(the maximum of the given ones).
+
+%Some Other control sequences in the \TeX\ output will be
+%`\.{\\\\\{}$\,\ldots\,$\.\}' 
+%surrounding identifiers, `\.{\\\&\{}$\,\ldots\,$\.\}' surrounding
+%reserved words, `\.{\\.\{}$\,\ldots\,$\.\}' surrounding strings,
+%`\.{\\C\{}$\,\ldots\,$\.\}$\,$|force|' surrounding comments, and
+%`\.{\\X$n$:}$\,\ldots\,$\.{\\X}' surrounding module names, where
+%|n| is the module number.
+
+# We write out the names of all the key words used translations, 
+so we can check that
+\.{WEAVE} can be expected to recognize them.
+This helps us catch the problem early if a translation given is
+not one of the above
+(as opposed to, say, having the C~compiler fail to compile \.{WEAVE}).
+#<Write lists...#>=
+	for (t in translation_keywords) {
+		print t > translationfile
+		}
+
+# #<Write stat...#>=
+for (t in translation_keywords) {
+	num_of_translation_keywords++
+	}
+printf "You used %d translation keywords.\n", \
+	num_of_translation_keywords > logfile
+printf "You used %d translation keywords.\n", num_of_translation_keywords
+
+# If the macro facility worked right, 
+we would use the following patterns to recognize items as they occur:
+#d cat_pattern = #=/[a-zA-Z][a-zA-Z_]*/#>
+#d trans_pattern = #=/<(([0-9]|[a-zA-Z][a-zA-Z_]*|"([^"]*\\")*[^"]*"|\*)-)*#>#&
+                      #=([0-9]|[a-zA-Z][a-zA-Z_]*|"([^"]*\\")*[^"]*"|\*)>/#>
+
+# Here's where we swallow a translation and spit out the \.{WEAVE} code
+to handle that translation.
+Since AWK has no functions, we define this as a module.
+
+When we're appending a key word {\it in the process of creating a 
+scrap from a token}, we use |small_app| in preference to |app|, 
+because |app|'s cleverness about mathness and dollar signs only works when 
+reducing existing scraps, not when creating scraps from tokens.
+We'll expect the variable |append_keyword| to be set to either 
+|"small_app"| or |"app"|.
+
+
+#<Take translation from |transstring| and write corresponding \.{WEAVE} code to
+|outstring|, using |selfstring| as translation of |"<*>"|#>=
+temp = substr(transstring,2,length(transstring)-2) ## kills awk bug
+trcnt = split(temp,trtok,"-")
+outstring = ""
+for (tridx=1;tridx<=trcnt;tridx++) {
+	alternate=trtok[tridx]
+	#<Convert |"space"| and |"dash"|#>
+	if (alternate ~ #=/^[0-9]$/#>) { ## digit
+		temp = sprintf("\tapp_str(\"%s\");\n",alternate)
+		outstring=outstring temp
+	} else if (alternate ~ #=/^[a-zA-Z_]+$/#>) { ## key word
+		translation_keywords[alternate]=1 ## remember
+		temp = sprintf("\t%s(%s);\n",append_keyword,alternate) 
+##Call |app| or |small_app| depending whether we're reducing or creating scraps
+		outstring=outstring temp
+	} else if (alternate ~ #=/^\"([^"]*\\\")*[^"]*\"$/#>) { ## string
+		temp = sprintf("\tapp_str(%s);\n",alternate)
+		outstring=outstring temp
+	} else if (alternate ~ #=/^\*$/#>) { ## self marker
+		#<If |selfstring==""|, complain loudly#>
+		outstring=outstring selfstring
+	} else { 
+		print "Bogus translation", wherestring
+		exitcode = -1
+	}
+}
+
+# Here we convert the key words |space| and |dash| to strings.
+We quote the strings, to be sure that they are handled by the string
+mechanism.
+#<Convert |"space"|...#>=
+	if (alternate=="space") {
+		alternate="\" \""
+	} else if (alternate=="dash") {
+		alternate="\"-\""
+	}
+
+
+# There are some places (notably in productions) where the translation
+|"<*>"| makes no sense.
+In this case the caller sets |selfstring=""|, and we complain.
+#<If |selfstring==""|, complain...#>=
+if (selfstring=="") {
+	print "Translation \"<*>\" makes no sense", wherestring
+	exitcode = -1
+	}
+
+# There are times when we may want to convert a translation directly
+into a quoted string, usually for \.{TANGLE}'s benefit.
+Here, the only things allowed are quoted strings and |space| and |dash|.
+We peel off quote marks and concatenate things together, and then we
+put the quote marks back on at the end.
+#<Convert restricted translation in |transstring| 
+	to quoted string in |outstring|#>=
+temp = substr(transstring,2,length(transstring)-2) ## kills awk bug
+trcnt = split(temp,trtok,"-")
+outstring = ""
+for (tridx=1;tridx<=trcnt;tridx++) {
+    alternate=trtok[tridx]
+    #<Convert |"space"| and |"dash"|#>
+    if (alternate ~ #=/^[0-9]$/#>) { ## digit
+        print "Digit not allowed in restricted translation", wherestring
+        exitcode = -1
+    } else if (alternate ~ #=/^[a-zA-Z_]+$/#>) { ## key word
+        print "Key word not allowed in restricted translation", wherestring
+        exitcode = -1
+    } else if (alternate ~ #=/^\"([^"]*\\\")*[^"]*\"$/#>) { ## string
+        temp = substr(alternate,2,length(alternate)-2) ## strip quotes
+        outstring=outstring temp
+    } else if (alternate ~ #=/^\*$/#>) { ## self marker
+        print "<*> not allowed in restricted translation", wherestring
+        exitcode = -1
+    } else { 
+        print "Bogus restricted translation", wherestring
+        exitcode = -1
+    }
+}
+outstring = "\"" outstring "\"" ## put quotes back on |outstring|
+
+
+
+#*Tokens.
+
+Tokens are pretty complicated.
+Each token has a string by which we recognize it in the input.
+This string is what immediately follows the |token| command.
+Then, there's another string that tells \.{TANGLE} how to write out 
+the token.
+Finally, it has a category and a translation (so we can make a scrap out
+of it), and a mathness (to tell us whether it has to be in math
+mode, horizontal mode, or either).
+The 
+\.{translation} and \.{mathness} have defaults.
+
+#*2Scanning for token descriptions.
+This module is used everywhere we must scan a line for token descriptions.
+#<Scan this line from |start_place| to finish, looking for
+        \.{translation}$\ldots$ and putting results in
+        |this_translation|$\ldots$#>=
+for (i=start_place;i<NF;) {
+     if ($i=="tangleto") { ## for \.{TANGLE}
+        i++
+        this_tangleto=$i
+        i++
+    } else if ($i=="translation") { ## for \.{WEAVE}
+        i++
+        this_translation=$i
+        i++
+    } else if ($i=="mathness") { ## for \.{WEAVE}
+        i++
+        this_mathness=$i
+        i++
+    } else if ($i=="category") { ## for \.{WEAVE}
+        i++
+        this_category=$i
+        categories[$i]=1
+        i++
+    } else if ($i=="name") { ## for debugging
+        i++
+        this_name="SP_" $i ##OK, so it's hacking...
+        i++
+    } else {
+        print "Error: unrecognized token description", $i, "on line", NR
+        #<Punt...#>
+    }
+}
+#<Check that we used everything#>
+
+# We check for the presence or absence of certain empty strings after
+scanning.
+#<Make sure |this_name| is empty#>=
+if (this_name != "") {
+	print "Error: name doesn't apply on line", NR
+	#<Punt...#>
+	}
+# #<Make sure |this_tangleto| is empty#>=
+if (this_tangleto != "") {
+	print "Error: tangleto doesn't apply on line", NR
+	#<Punt...#>
+	}
+# #<Make sure |this_category| is empty#>=
+if (this_category != "") {
+	print "Error: category doesn't apply on line", NR
+	#<Punt...#>
+	}
+# #<Make sure |this_translation| is empty#>=
+if (this_translation != "") {
+	print "Error: translation doesn't apply on line", NR
+	#<Punt...#>
+	}
+# #<Make sure |this_category| is not empty#>=
+if (this_category == "") {
+	print "Error: you must give a category on line", NR
+	#<Punt...#>
+	}
+
+#*1Setting the default token descriptions.
+\.{SPIDER} maintains default information about {\em mathness}
+and {\em translation}, so these can be omitted from token descriptions.
+We can change the operative defaults at any time by using a
+|"default"| command.
+It too, scans for keywords, using the standard scanning module
+#<Pattern-action...#>=
+#=/^default /#> {
+	print "Setting defaults..." > logfile
+	start_place=2
+	#<Set |this_mathness| etcetera to the defaults and those with no
+		defaults to |""|#>
+	#<Scan this line from |start_place| to finish, looking for
+		\.{translation}$\ldots$ and putting results in
+		|this_translation|$\ldots$#> 
+	#<Make sure |this_name| is empty#>
+	#<Make sure |this_category| is empty#>
+	default_translation=this_translation
+	default_mathness=this_mathness
+#@	print "\tdefault translation is", default_translation > logfile
+	print "\tdefault mathness is", default_mathness > logfile
+#@	next	
+}
+
+# Normally, we will set all quantities to the defaults before scanning:
+#<Set |this_mathness| etcetera to the defaults and those with no
+defaults to |""|#>=
+	this_translation=default_translation
+	this_mathness=default_mathness
+	this_name=""
+	this_category=""
+	this_tangleto=""
+# When \.{SPIDER} starts up, the defaults are already set:
+#<Set initi...#>=
+	default_translation="<*>"
+	default_mathness="maybe"
+
+
+#*1Recognizing token designators.
+Let's begin by discussing the way \.{WEAVE} and \.{TANGLE} represent
+tokens internally.
+
+\.{WEAVE} and \.{TANGLE} process tokens in a two-step process.
+Both read the token from the input using |get_next|, which returns a
+unique eight-bit number representing the token.
+Generally printable ASCII characters represent themselves, and other
+tokens get numbers in the unprintable range.
+\.{TANGLE} assigns ranges to some tokens ahead of time: |string| is 2,
+|identifier| is #'202, and so on.
+Tokens that we introduce to \.{TANGLE} must have numbers between 
+#'13 and #'37 inclusive.
+
+Rather than work with eight-bit numbers themselves, we use names for
+the tokens.
+This makes \.{WEAVE} and \.{TANGLE} easier to debug when things go wrong.
+
+In \.{WEAVE}, the category, mathness, and translation are all
+attached to a scrap based on the eight-bit number returned by
+|get_next|, and this is done at a later time.
+
+In \.{TANGLE}, characters are written to the output file(s) based on
+the token code, which can be either eight bits for simple tokens or
+sixteen for identifiers and things.
+
+Our mission in this section will be to read in all the token
+information from the {\tt token} command, 
+and to create the names and numbers used by \.{WEAVE} and \.{TANGLE}
+to represent the tokens.
+In the next section we will
+write the code that processes the tokens for both \.{WEAVE} and
+\.{TANGLE} (lexical analysis in 
+|get_next|, and subsequent processing elsewhere).
+You will pardon us if things get a bit tedious.
+
+# The {\tt token} command is used to specify tokens that are not
+reserved words.
+Reserved word tokens get special treatment all their own.
+
+#<Pattern...#>=
+#=/^token /#> {
+	print "Token", $2 > logfile
+	if ($2=="identifier") {
+		#<Process identifier token description#>
+	} else	if ($2=="number") {
+		#<Process numeric token description#>
+	} else	if ($2=="newline") {
+		#<Process newline token description#>
+	} else	if ($2=="pseudo_semi") {
+		#<Process |pseudo_semi| token description#>
+	} else if ($2 ~ #=/[a-zA-ZA-Z0-9]+/#>) { 
+		## we recognize no other names
+		print "Error: unknown token species:", $2
+		#<Punt this command#>
+	} else { 
+		#<Process a non-alphanumeric token description#>
+	}
+	categories[this_category]=1 ## is this right?
+#^questions#>
+	next
+}
+
+# Identifiers, numbers (and string literals), newlines, and the special
+token \.{pseduo\_semi} are predefined.
+#<Process identifier token description#>=
+	#<Set |this_mathness| etcetera to the defaults and those with no
+		defaults to |""| #>
+	this_translation=""
+	start_place=3
+	#<Scan this line from |start_place| to finish, looking for
+		\.{translation}$\ldots$ and putting results in
+		|this_translation|$\ldots$#> 
+	#<Make sure |this_name| is empty#>
+	#<Make sure |this_tangleto| is empty#>
+	#<Make sure |this_category| is not empty#>
+	#<Make sure |this_translation| is empty#>
+	id_category=this_category
+	id_mathness=this_mathness
+
+# We have yet to implement a separate procedure for numerics and strings!
+#<Process numeric token description#>=
+	print "Warning: numeric constants and strings are",\
+		"identified in this WEAVE."
+	print "Warning: numeric constants and strings are",\
+		"identified in this WEAVE." > logfile
+	#<Set |this_mathness| etcetera to the defaults and those with no
+		defaults to |""| #>
+	this_translation=""
+	start_place=3
+	#<Scan this line from |start_place| to finish, looking for
+		\.{translation}$\ldots$ and putting results in
+		|this_translation|$\ldots$#> 
+	#<Make sure |this_name| is empty#>
+	#<Make sure |this_tangleto| is empty#>
+	#<Make sure |this_category| is not empty#>
+	#<Make sure |this_translation| is empty#>
+	number_category=this_category
+	number_mathness=this_mathness
+
+#
+#<Process newline token description#>=
+	#<Set |this_mathness| etcetera to the defaults and those with no
+		defaults to |""| #>
+	start_place=3
+	#<Scan this line from |start_place| to finish, looking for
+		\.{translation}$\ldots$ and putting results in
+		|this_translation|$\ldots$#> 
+	#<Make sure |this_name| is empty#>
+	#<Make sure |this_tangleto| is empty#>
+	#<Make sure |this_category| is not empty#>
+	newline_category=this_category
+	newline_mathness=this_mathness
+	newline_translation=this_translation
+
+#
+#<Process |pseudo_semi| token description#>=
+	#<Set |this_mathness| etcetera to the defaults and those with no
+		defaults to |""| #>
+	start_place=3
+	#<Scan this line from |start_place| to finish, looking for
+		\.{translation}$\ldots$ and putting results in
+		|this_translation|$\ldots$#> 
+	#<Make sure |this_name| is empty#>
+	#<Make sure |this_tangleto| is empty#>
+	#<Make sure |this_category| is not empty#>
+	pseudo_semi_category=this_category
+	pseudo_semi_mathness=this_mathness
+	pseudo_semi_translation=this_translation
+
+# Here is where things get a bit more interesting; we have to
+consider all the other (non-reserved-word) tokens, and find a way to
+convert them to \.{WEAVE} and \.{TANGLE}'s internal form.
+We take single characters straight, except for those that must be
+escaped one way or another.
+For multicharacter tokens, we have to invent a name and a number, 
+which process we will describe below.
+
+
+Tokens have a zillion attributes:  not just category, translation, and
+their friends, but things like internal representations, the length of
+the input string, you name it.
+
+We remember the length of the longest token in the system, 
+because when we go to
+recognize tokens we will look for the longest first and then on down.
+We maintain that length at the very end here.
+#<Process a non-alphanumeric token description#>=
+	this_string=$2
+	#<Translate |"{space}"| to |" "| in |this_string|#>
+	$2 = this_string
+	#<Set |tokenname[$2]|, |tokenlength[$2]|, and, for long
+		tokens, set |tokentest[$2]| and |tokennumbers[$2]|#>
+	if (tokens[$2]!="") {
+		print "Warning: token", $2, "defined twice"
+		}
+	tokens[$2]=1 ## remember this token
+	#<Set attributes of token |$2|#>
+	#<Make sure token |$2| has a number if it needs one#>
+	#<Update record of maximum token length#>
+
+
+# This code represents and undocumented feature.
+We should replace it by allowing restricted translations
+in |$2|, the then documenting it.
+When doing this, we'll have to match the full |trans_pattern|
+in all its glory; A mere |#=/<.*>/#>| won't do.
+
+#<Translate |"{space}"| to |" "| in |this_string|#>=
+old_string = this_string
+this_string = ""
+## Invariant: |this_string old_string| corresponds to result, and 
+## |"{space}"| is translated in |this_string| but not |old_string|
+idx = index(old_string,"{space}")
+while (idx != 0) {
+	temp =substr(old_string,1,idx-1)
+	this_string = this_string temp " "
+	old_string = substr(old_string,idx+7)
+	idx = index(old_string,"{space}")
+}
+this_string = this_string old_string
+
+# Tokens need an internal eight-bit representation.
+For single characters (which are assumed to be printable), we use
+the ASCII code as the internal representation.
+Multicharacter tokens will be assigned a name and a number.
+(The names may be specified by the user or generated by \.{SPIDER}.)
+Unfortunately the numbers for \.{WEAVE} and \.{TANGLE} have to be
+different (the reasons will only depress you).
+We assign \.{WEAVE} numbers by starting numbering from |highesttoken|, and
+working our way down.
+At the moment |hisghesttoken==200|, and I can't remember whether 200 is
+a ``magic number'' or not, so you'd better assume that it is.
+We get the tpoken numbers for \.{TANGLE} by subtracting an offset,
+as you'll see later.
+#<Set initial...#>=
+	highesttoken=200 ## highest numbered token
+	tokennumber=highesttoken
+
+# At the end we check to make sure we haven't used up too many numbers
+for tokens.
+\.{WEAVE} token numbers must be |>=127|.
+#<Check for errors at the...#>=
+if (tokennumber<127) {
+	print "Error: too many token names for WEAVE --- over by",\
+		127-tokennumber
+	exitcode=-1
+	}
+# \.{TANGLE} tokens must be between #'13 and #'37 inclusive.
+We add three to the number because \.{TANGLE} has special definitions for
+the three tokens taken off the top.
+#<Check for errors...#>=
+if (highesttoken-tokennumber > #'37-(#'13-1)+3) { \
+		## number of tokens in |#'13|--|#'37|, plus 3
+	print "Error: too many token names for TANGLE --- over by",\
+		highesttoken-tokennumber - (#'37-(#'13-1)+3)
+	exitcode=-1
+	}
+	
+
+
+# The token name is what \.{WEAVE} and \.{TANGLE} will use internally
+to refer to the token's internal representation as an eight-bit code.
+We use names instead of using the numbers directly in the vague hope that
+it will make \.{WEAVE} and \.{TANGLE} easier to debug when something goes
+wrong.
+For multi-character tokens, the name will be a \.{WEB} macro that is defined
+to be equal to the token's eight-bit code.
+If the token is a single character, its ``name'' will be that character,
+quoted with single quotes.
+The single-character tokens \.{@}, \.{\\}, and \.{'} require special
+handling, since they have to be escaped in some way to be quoted.
+
+Once we've computed the name, we put it in  |tokenname[$2]|.
+#<Set |tokenname[$2]|, |tokenlength[$2]|, and, for long
+	tokens, set |tokentest[$2]| and |tokennumbers[$2]|#>=
+	if ($2=="@") {
+		$2="@@"
+		tokenname[$2]="'@@'"
+		tokenlength[$2]=1
+	} else if ($2=="'" || $2 == "\\") {
+		$2="\\" $2
+		tokenname[$2]="'" $2 "'"
+		tokenlength[$2]=1
+	} else if (length($2)>1) {
+		#<Handle multicharacter tokens#>
+	} else {
+		temp = sprintf("'%s'", $2)
+		tokenname[$2] = temp
+		tokenlength[$2]=1
+	}
+
+# For the long tokens, we generate a name by which we'll refer to the
+token.
+That name will actually be defined to be a number, which we'll take to
+be the current value of |tokennumber|.
+We'll write in |tokentest[$2]| the C~code used to recognize that token,
+and in |tokenlength[$2]| we'll leave that token's length.
+(The length is used both to find long tokens before short ones, and
+to avoid finding long ``tokens'' that 
+actually go beyond the end of the line.)
+#<Handle multicharacter tokens#>=
+	tokenname[$2]="SP_gen_token_" tokennumber
+	tokennumbers[$2]=tokennumber
+	tokennumber--
+	## figure out how to recognize the token
+	temp = sprintf( "strncmp(\"%s\",loc-1,%d)==0", $2, length($2))
+	tokentest[$2]=temp
+	tokenlength[$2]=length($2)
+
+
+# The setting of attributes is as for all tokens:
+#<Set attributes of token |$2|#>=
+	#<Set |this_mathness| etcetera to the defaults and those with no
+		defaults to |""| #>
+	this_name=tokenname[$2]
+	start_place=3
+	#<Scan this line from |start_place| to finish, looking for
+		\.{translation}$\ldots$ and putting results in
+		|this_translation|$\ldots$#> 
+	#<Make sure |this_category| is not empty#>
+	tokencategory[$2]=this_category
+	tokenmathness[$2]=this_mathness
+	tokentranslation[$2]=this_translation
+	tokenname[$2]=this_name
+	tokentangleto[$2]=this_tangleto
+
+# We have to remember the length of the longest token so we can
+recognize long tokens before short ones.
+#<Update record of maximum token length#>=
+	temp = tokenlength[$2]
+	if (temp > maxtokenlength) {
+		maxtokenlength=temp
+		}
+
+# We're paranoid.
+#<Make sure token |$2| has a number if it needs one#>=
+	if (tokenlength[$2]>1 && tokennumbers[$2]=="") {
+		print "This can't happen: token", $2, "is long", \
+			"but has no number"
+		exitcode = -1
+	}
+
+
+#*1Writing {\tt WEB}'s lexical analysis code.
+The token recognition problem is the same for \.{WEAVE} and
+\.{TANGLE}. 
+Both have routines called |get_next| that recognize the tokens on
+input.
+Most of |get_next| is prefabricated 
+(and the same in both \.{WEAVE} and \.{TANGLE}),
+but we have to put in the part that recognizes multi-character
+non-alphanumeric tokens.
+
+We write the same code to both \.{WEAVE} and \.{TANGLE}.
+#<Write out...#>=
+	tempfile = scrapfile
+	#<Write token recognition code to |tempfile|#>
+	tempfile = ttokfile
+	#<Write token recognition code to |tempfile|#>
+	
+# This is how we do it.
+#<Write token recognition code to |tempfile|#>=
+print "@ Here we input tokens of more than one character" > tempfile
+print "@<Compress two-symbol operator@>=" > tempfile
+#<Look for multicharacter tokens, starting with the longest,
+	and working down#>
+
+# We look for long tokens, then shorter, and so on.
+We have to make sure we don't look beyond the end of a line.
+#<Look for multicharacter tokens, starting with the longest,
+		and working down#>=
+	for (len=maxtokenlength; len>=2; len--) {
+		printf "if (loc+%d<=limit) {\n", len-1 > tempfile
+		#<Check for tokens in |tokentest| of length |len|#>
+		printf "\t}\n" > tempfile
+		}
+	#<Make sure there are no tokens of length 1 in |tokentest|#> 
+
+# #<Check for tokens in |tokentest| of length |len|#>=
+notfirst=0
+for (t in tokentest) {
+	if (tokenlength[t]==len) {
+		printf "\t" > tempfile
+		if (notfirst==1) {
+			printf "else " > tempfile
+			}
+		notfirst=1
+		printf "if (%s) {\n", tokentest[t] > tempfile
+		printf "\t\tloc += %d;\n", len-1 > tempfile
+		printf "\t\treturn %s;\n\t\t}\n", tokenname[t] > tempfile
+		}
+	}
+
+
+# #<Make sure there are no tokens of length 1 in |tokentest|#>=
+for (t in tokentest) {
+	if (tokenlength[t]==1) {
+		print "This can't happen: token", t, "is of length 1 but", \
+				"it has a test"
+		exitcode=-1
+	}
+}
+
+
+
+#*1Writing out {\tt WEAVE}'s token-to-scrap code.
+Here is where we write the code that converts an already-recognized
+token (from |get_next|) into a scrap.
+There are several different kinds of tokens, and each requires a
+slightly different treatment.
+Will write out the code for the different species one at a time.
+#<Write out all...#>=
+	print "Writing out predefined scraps" > logfile
+	#<Write code for identifier scrap#>
+	#<Write code for string or constant scrap#>
+	#<Write code for newline scrap#>
+	#<Write code for |pseudo_semi| scrap#>
+	print "Writing out token scraps" > logfile
+	#<Write code for ordinary token scraps#>
+
+
+
+
+# This is how we write out the information for the identifier.
+#<Write code for identifier scrap#>=
+	if (id_category != "") {
+	print "@ @<Append an identifier scrap@>=" > scrapfile
+	print "p=id_lookup(id_first, id_loc,normal);" > scrapfile
+	print "if (p->ilk==normal) {" > scrapfile
+	print "  small_app(id_flag+p-name_dir);" > scrapfile
+	printf "  app_scrap(SP_%s,%s_math);", \
+			id_category, id_mathness > scrapfile
+	appended[id_category]=1
+	print " /* not a reserved word */" > scrapfile
+	print "}" > scrapfile
+	print "else if reserved(p) {" > scrapfile
+	print "@<Decide on reserved word scraps@>;" > scrapfile
+	print "}" > scrapfile
+	print "else {" > scrapfile
+	print " err_print(\"! Identifier with unmentioned ilk\");" > scrapfile
+	print "@.Identifier with unmentioned ilk@>" > scrapfile
+	print "}" > scrapfile
+	} else {
+		print "Error: I don't know what to do with an identifier"
+		print "       Please give me a \"token identifier ...\""
+		exitcode = -1
+		}
+
+# We hold the name |"identifier"|, and we reserve a number for
+identifiers.
+#<Set initial...#>=
+	tokennumbers["identifier"]=tokennumber; tokennumber--
+	tokenname["identifier"]="identifier"
+
+# This is how we write out the string or constant scrap, at the end.
+#<Write code for string or constant scrap#>=
+print "Warning: TeX strings have the same category as ", \
+	"numeric constants in this WEAVE."
+print "Warning: TeX strings have the same category as ", \
+	"numeric constants in this WEAVE." > logfile
+if (number_category != "") {
+print "@ For some reason strings, constants,",\
+	" and \TeX\ strings are identified." > scrapfile
+print "That has to be fixed." > scrapfile
+print "@<Do the |app_scrap| for a string or constant@>=" > scrapfile
+printf "app_scrap(SP_%s,%s_math);\n", number_category,\
+	number_mathness > scrapfile
+appended[number_category]=1
+} else {
+	print "Error: I don't know what to do with a numeric constant"
+	print "       Please give me a \"token number ...\""
+	exitcode = -1
+	}
+
+
+# We hold names and numbers for constants and strings, as well as identifiers.
+#<Set initial...#>=
+	tokennumbers["constant"]=tokennumber; tokennumber--
+	tokenname["constant"]="constant"
+	tokennumbers["string"]=tokennumber; tokennumber--
+	tokenname["string"]="string"
+
+
+# 
+#<Write code for newline scrap#>=
+if (newline_category != "") {
+	print "@ @<Append a newline scrap@>=" > scrapfile
+	transstring=newline_translation
+	selfstring="small_app(next_control);"
+	wherestring="in translation of token newline"
+	append_keyword="small_app"
+	#<Take translation from |transstring| and write corresponding \.{WEAVE} code to
+		|outstring|, using |selfstring| as translation of |"<*>"|#>
+	print outstring > scrapfile
+	printf "  app_scrap(SP_%s,%s_math);\n", newline_category,\
+		newline_mathness > scrapfile
+	appended[newline_category]=1
+} else {
+	print "Error: I don't know what to do with a newline"
+	print "       Please give me a \"token newline ...\""
+	exitcode = -1
+	}
+
+# 
+#<Write code for |pseudo_semi| scrap#>=
+if (pseudo_semi_category != "") {
+	print "@ @<Append a |pseudo_semi| scrap@>=" > scrapfile
+	transstring=pseudo_semi_translation
+	selfstring="small_app(next_control);"
+	wherestring="in translation of token pseudo_semi"
+	append_keyword="small_app"
+	#<Take translation from |transstring| and write corresponding \.{WEAVE} code to
+		|outstring|, using |selfstring| as translation of |"<*>"|#>
+	print outstring > scrapfile
+	printf "  app_scrap(SP_%s,%s_math);\n", pseudo_semi_category,\
+		pseudo_semi_mathness > scrapfile
+	appended[pseudo_semi_category]=1
+} else {
+	printf "Error: I don't know what to do with a pseudo_semi (%s;)",\
+			substr(at_sign,1,1)
+	print "       Please give me a \"token pseudo_semi ...\""
+	exitcode = -1
+	}
+
+# Here is how we write out the code that converts ordinary tokens to scraps:
+#<Write code for ordinary token scraps#>=
+print "@ @<Cases for ordinary tokens@>=" > scrapfile
+for (t in tokens) {
+	temp = tokenname[t]
+	printf "case %s:\n", temp > scrapfile
+	transstring=tokentranslation[t]
+	selfstring="small_app(next_control);"
+	wherestring= sprintf ("in translation of token %s", t)
+	append_keyword="small_app"
+	#<Take translation from |transstring| and write corresponding \.{WEAVE} code to
+		|outstring|, using |selfstring| as translation of |"<*>"|#>
+	print outstring > scrapfile
+	printf "\tapp_scrap(SP_%s,%s_math);\n", tokencategory[t], \
+		tokenmathness[t] > scrapfile
+	temp = tokencategory[t]
+	appended[temp]=1
+#^append check#>
+	print "\tbreak;" > scrapfile
+	}
+
+#*3{\tt TANGLE}'s token-to-output conversion.
+We have to write special cases for things appearing in |tokennumbers|.
+The output conventions for |string|, |constant| and |identifier| are
+fixed by \.{TANGLE}.
+
+One day we have to improve \.{TANGLE}'s treatment of spacing in the output;
+at the moment it just makes sure there are spaces between adjacent identifiers
+or numbers.
+#^future enhancements#>
+#<Write out...#>=
+print "@ @<Cases for tokens to be output@>=" > ttokfile
+for (t in tokennumbers) {
+       #<If |t| is |"string"|, |"constant"|, or |"identifier"|, just |continue|#>
+	printf "case %s:\n", tokenname[t] > ttokfile
+	this_tangleto = tokentangleto[t]
+	if (this_tangleto=="") {
+		printf "\tC_printf(\"%%s\",\"%s\");\n",t > ttokfile
+	} else {
+		printf "\tif (out_state==verbatim) {\n" > ttokfile
+		printf "\t\tC_printf(\"%%s\",\"%s\");\n",t > ttokfile
+		printf "\t} else {\n" > ttokfile
+		#<Write code to print |this_tangleto| onto |ttokfile|#>
+		printf "\t}\n" > ttokfile
+	}
+	print "\tif (out_state!=verbatim) out_state=misc;" > ttokfile
+	print "break;" > ttokfile
+	}
+
+# We also have to write something for the tokens that aren't in |tokennumbers|
+but which have a nonnull |tokentangleto| anyway.
+#<Write out...#>=
+print "@ @<Cases for tokens to be output@>=" > ttokfile
+for (t in tokentangleto) {
+       #<If |t| is |"string"|, |"constant"|, or |"identifier"|, just |continue|#>
+	if (tokennumbers[t]!="" || tokentangleto[t]=="")
+		continue
+	if (t=="@") {
+		thistangletokname = "@@"
+	} else if (t=="\\" || t=="'") {
+		thistangletokname = "\\" t
+	} else {
+		thistangletokname = t
+	}
+	printf "case '%s':\n", thistangletokname > ttokfile
+	this_tangleto = tokentangleto[t]
+	if (this_tangleto=="") {
+		print "This can't happen -- null tangleto for", t, wherestring
+		exitcode = -1
+	} else {
+		printf "\tif (out_state==verbatim) {\n" > ttokfile
+		printf "\t\tC_printf(\"%%s\",\"%s\");\n",t > ttokfile
+		printf "\t} else {\n" > ttokfile
+		#<Write code to print |this_tangleto| onto |ttokfile|#>
+		printf "\t}\n" > ttokfile
+	}
+	print "\tif (out_state!=verbatim) out_state=misc;" > ttokfile
+	print "break;" > ttokfile
+}
+# The tokens for |string|, |constant|, and |identifier| are treated
+specially by \.{TANGLE}; code to handle them already lives in \.{TANGLE}.web.
+Therefore, we don't gum up the works with our scheming.
+#<If |t| is |"string"|, |"constant"|, or |"identifier"|, just |continue|#>=
+if (t=="string"||t=="constant"||t=="identifier")
+	continue
+
+
+
+# This is somewhat like the translation code, but tuned for \.{TANGLE}
+#<Write code to print |this_tangleto| onto |ttokfile|#>=
+oldwherestring = wherestring
+wherestring = "for tangleto " wherestring
+#@
+transstring=this_tangleto
+#<Convert restricted translation in |transstring| 
+	to quoted string in |outstring|#>
+printf "\tC_printf(\"%%s\",%s);\n",outstring > ttokfile
+#@
+wherestring=oldwherestring
+
+
+
+#*3Defining the token names.
+ At some point we'll have to define all these names, for both
+\.{TANGLE} and \.{WEAVE}. We may as well
+show how we do that now.
+#<Write out...#>=
+	tempfile = scrapfile
+	#<Write the definitions of the token names to |tempfile|#>
+	tempfile = ttokfile
+	#<Write the definitions of the token names to |tempfile|#>
+
+# We use an ugly trick to get the token numbers different for 
+\.{WEAVE} and \.{TANGLE}:
+#<Write the definitions of the token names to |tempfile|#>=
+	print "@ Here are the definitions of the token names" > tempfile
+	for (t in tokennumbers) {
+		temp = tokennumbers[t]
+		if (temp==0)
+			continue  ## don't know why we need this!!
+		if (tempfile==ttokfile) { ## output to \.{TANGLE}
+		    #<If |t| is |"string"|, |"constant"|, or |"identifier"|, 
+			   just |continue|#> ## already defined in \.{TANGLE}
+			temp = temp + #'37 + 3 - highesttoken ## hackety hack!
+			      ## +3 because three highest are already defined!
+			}
+		printf "@d %s = %s\n", tokenname[t], temp > tempfile
+		}
+
+
+# Some token names are just characters quoted with |'|. We write out
+all the others.
+#<Write lists...#>=
+	for (t in tokenname) {
+		temp = tokenname[t]
+		if (substr(temp,1,1) != "'") {
+			#<Strip opening |"SP_"| from |temp|, if it is there#>
+			print temp > tokennamefile
+			}
+		}
+
+# #<Strip opening |"SP_"| from |temp|, if it is there#>=
+tempa=substr(temp,1,3)
+if (tempa=="SP_") {
+	temp = substr(temp,4) ## remove |"SP_"|
+	}
+
+
+#*Reserved words and ilks.
+\.{TANGLE} doesn't even need the {\it idea} of
+ reserved words; it treats them like
+all other identifiers.
+\.{WEAVE}, however, needs to be able to recognize reserved words to do
+prettyprinting. 
+\.{WEAVE} uses a two-tiered system for coping with reserved words.
+I think this system was really designed to make it easier to code
+\.{WEAVE} by hand, and is therefore not of much interest for
+\.{SPIDER}, but we retain it as a matter of least resistance.
+
+Every reserved word belongs to an ilk, and it is the ilks that, like
+tokens, have translations, categories, and so on.
+
+I have made a bewildering array of defaults that is probably full of
+bugs.
+We use a special convention to initialize the |this_| family.
+
+#<Pattern-act...#>=
+#=/^ilk /#> {
+	print "Ilk", $2 > logfile
+	#<Set |this_mathness| etcetera to the defaults and those with no
+		defaults to |""| #>
+	#<If no category is specified, invent a default if you can#>
+	this_name=""
+	start_place=3
+	#<Scan this line from |start_place| to finish, looking for
+		\.{translation}$\ldots$ and putting results in
+		|this_translation|$\ldots$#> 
+	#<Make sure |this_category| is not empty#>
+	#<Make sure |this_name| is empty#>
+	ilk_category[$2]=this_category
+	ilk_mathness[$2]=this_mathness
+	ilk_translation[$2]=this_translation
+	next
+}
+
+
+# The pernicious option here is to be able to leave off the category, so
+that an item of ilk |fish_like| will get category |fish|.
+
+#<If no category is specified, invent a default if you can#>=
+	if ($2 ~ #=/^[a-zA-Z_]+_like$/#> && $0 !~ #=/ category /#>) { 
+		## give default category
+		this_category = substr($2,1,length($2)-5)
+		categories[this_category]=1
+		}
+
+# For the reserved words, our only option is to set an ilk.
+We go through wild and assuredly ill-advised gyrations attempting to
+set all the default properties of that ilk.
+If the ilk is omitted, we make a new ilk by attaching the string
+|"_like"| to the name of the reserved word.
+{\bf Don't use this feature; it embarrasses the author.}
+#^ill-advised#>
+#<Pattern-action...#>=
+#=/^reserved /#> {
+	print "Reserved word", $2 > logfile
+	if ($0 !~ #=/ ilk /#>) {
+		#<Attempt to make up an ilk, with all its defaults#>
+	}
+	for (i=3; i<=NF;) {
+		if ($i == "ilk") {
+			i++
+			reservedilk[$2]=$i
+			has_reserved[$i]=1 ## remember that ilk has some reserved word
+			i++
+		} else {
+			print "Error: bad reserved word attribute:", $i, \
+				"on line", NR
+			#<Punt...#>
+		}
+	}
+	#<Check that we used everything#>
+	next
+}
+
+# Here is our feeble attempt to make up an ilk for a reserved word for
+which no ilk is given.
+The default ilk for |"with"| is |"with_like"|, and so on.
+{\bf Please, please don't do this.}
+#<Attempt to make up an ilk, with all its defaults#>=
+	temp = $2 "_like"
+	reservedilk[$2]=temp
+	if (ilk_translation[temp]=="") {
+		ilk_translation[temp]=default_translation
+	}
+	has_reserved[temp]=1
+	if (ilk_mathness[temp]=="") {
+		ilk_mathness[temp]=default_mathness
+	}
+	## and default category for that ilk is the resword itself
+	if (ilk_category[temp]=="") {
+		ilk_category[temp]=$2
+		categories[$2]=1
+	}
+	ilk_is_made_up[temp]=1 ## we really should do something with this
+#^mistakes#>
+
+
+#*1Telling {\tt WEAVE} how to recognize reserved words.
+At the end, we'll write out definitions for the ilk names, and we'll
+write translations of all the ilks.
+#<Write out all...#>=
+print "Writing out reserved words and ilks" > logfile
+ilkno=64
+print "@ Here is a list of all the ilks" > reserved
+for (i in ilk_translation) {
+	printf "@d SP_%s = %d\n", i, ilkno > reserved
+	ilkno++
+	}
+
+# Here is where we write the code that converts reserved word tokens
+into scraps.
+#<Write out all...#>=
+print " " > reserved
+print "@ Here are the scraps we get from the reserved words" > reserved
+print "@d the_word = res_flag+p-name_dir" > reserved
+print "@<Decide on reserved word scraps@>=" > reserved
+print "switch (p->ilk) {" > reserved
+for (t in ilk_translation) {
+	printf "\tcase SP_%s: \n\t\t", t > reserved
+	transstring=ilk_translation[t]
+	selfstring="small_app(the_word);"
+	wherestring= sprintf ("in translation of ilk %s", t)
+	append_keyword="small_app"
+	#<Take translation from |transstring| and 
+		write corresponding \.{WEAVE} code to
+		|outstring|, using |selfstring| as translation of |"<*>"|#>
+	if (trcnt>0) ## at least one text in the translation
+		has_translation[t]=1
+	print outstring > reserved
+	printf "\tapp_scrap(SP_%s,%s_math);\n", ilk_category[t], \
+	ilk_mathness[t] > reserved
+	temp=ilk_category[t]
+	appended[temp]=1
+#^append check#>
+	printf "\t\tbreak;\n" > reserved
+	}
+print "}" > reserved
+		
+
+# At the end, we'll have to enter each reserved word in the identifier
+table, along with its ilk.
+#<Write out all...#>=
+print "@ @<Store all the reserved words@>=" > reserved
+for (i in reservedilk) {
+    printf "id_lookup(\"%s\",NULL,SP_%s);\n", i, reservedilk[i] > reserved
+}
+
+# At the very end, we'll make sure every ilk has both a reserved word
+and some translation.
+{\bf Perhaps this could be cleaned up a bit?}
+#<Check for errors at...#>=
+	for (i in ilk_translation) {
+		if (has_reserved[i] != 1) {
+			print "Error: there is no reserved word of ilk", i
+			exitcode=-1
+			}
+		if (has_translation[i] != 1) {
+			print "Error: ilk", i, "has no translation"
+			exitcode=-1
+			}
+		}
+
+# #<Write lists...#>=
+	for (i in ilk_translation) {
+		print i > ilkfile
+		}
+
+# #<Write stat...#>=
+for (i in ilk_translation) number_of_ilks++
+for (i in reservedilk) number_of_reserved_words++
+printf "You defined %d reserved words of %d ilks.\n", \
+	number_of_reserved_words, number_of_ilks
+printf "You defined %d reserved words of %d ilks.\n", \
+	number_of_reserved_words, number_of_ilks > logfile
+
+#*The prettyprinting grammar.
+The most intricate part of \.{WEAVE} is its mechanism for converting
+programming language code into \TeX\ code.
+A ``bottom up'' approach is used to parse the
+programming language material, since \.{WEAVE} must deal with fragmentary
+constructions whose overall ``part of speech'' is not known.
+
+At the lowest level, the input is represented as a sequence of entities
+that we shall call {\it scraps}, where each scrap of information consists
+of two parts, its {\it category} and its {\it translation}. The category
+is essentially a syntactic class, and the translation is a token list that
+represents \TeX\ code. Rules of syntax and semantics tell us how to
+combine adjacent scraps into larger ones, and if we are lucky an entire
+program text that starts out as hundreds of small scraps will join
+together into one gigantic scrap whose translation is the desired \TeX\
+code. If we are unlucky, we will be left with several scraps that don't
+combine; their translations will simply be output, one by one.
+
+The combination rules are given as context-sensitive productions that are
+applied from left to right. Suppose that we are currently working on the
+sequence of scraps $s_1\,s_2\ldots s_n$. We try first to find the longest
+production that applies to an initial substring $s_1\,s_2\ldots\,$; but if
+no such productions exist, we find to find the longest production
+applicable to the next substring $s_2\,s_3\ldots\,$; and if that fails, we
+try to match $s_3\,s_4\ldots\,$, etc.
+
+A production applies if the category codes have a given pattern. For
+example, one of the productions is
+$$\hbox{\.{open [ math semi <\.{"\\\\,"}-opt-5> ] -->
+open math}}$$ 
+and it means that three consecutive scraps whose respective categories are
+|open|, |math|, and |semi| are con\-verted to two scraps whose categories
+are |open| and |math|. 
+ The |open| scrap has not changed, while the string \.{<"\\\\,"-opt-5>} 
+indicates that the new |math| scrap
+has a translation composed of the translation of the original
+|math| scrap followed by the translation of the |semi| scrap followed
+by `\.{\\,}' followed by `|opt|' followed by `\.5'. (In the \TeX\ file,
+this will specify an additional thin space after the semicolon, followed
+by an optional line break with penalty 50.) 
+
+Their is an extensive discussion of the grammar, with examples, in the
+``Spider User's Guide.''
+Y'oughta read it.
+
+#*1Scanning a production.
+ A production in the grammar is written as a sequence of category
+names and translations, followed by a right arrow (\.{-->}), followed
+by a category name.
+When \.{WEAVE} is scanning the sequence of scraps that makes up a
+module, it checks to see whether the categories of those scraps match
+the categories given on the left side of the production.
+If so, the production fires, and the scraps and translations on the
+left side of the arrow are combined into a single, new scrap, and the
+new scrap is given the category from the right side of the arrow.
+The scraps which are combined are called the firing scraps,
+#^firing scraps#>
+and the category given to the combination is called the target category.
+
+Instead of a category name, e.g.~``\.{math},'' one can write a list of
+category names, e.g.~``\.{(open\vert lsquare)}'' instead.
+A scrap matches the list if and only if its category is one of the
+names listed.
+One can also use the wildcard ``\.?'', which any scrap matches.
+
+On the right-hand side, one can write a \## followed by a number in
+place of the target category name.
+If we specify the target category as ``\.{\##2}'', for example, it
+means ``give the new scrap the same category as the second scrap that
+matched the left side of the production.''
+
+# Here is the whole syntax as quoted from the ``Spider User's Guide''
+
+\begingroup\def\\{\par\noindent\ignorespaces}\tt
+\noindent\syntax{production} \produces\\\quad
+\syntax{left context} [ \syntax{firing instructions} ] \syntax{right context}
+--> \syntax{left context} \syntax{target category} \syntax{right
+context}\\
+\syntax{left context} \produces~\syntax{scrap designators}\\
+\syntax{right context} \produces~\syntax{scrap designators}\\
+\syntax{firing instruction} \produces \syntax{scrap designator}\\
+\syntax{firing instruction} \produces \syntax{translation}\\
+\syntax{scrap designator} \produces~?\\
+\syntax{scrap designator} \produces~\opt{!}\syntax{marked category}\\
+\syntax{scrap designator} \produces~\opt{!}\syntax{category alternatives}\\
+\syntax{category alternatives} \produces~(\syntax{optional
+alternatives}\syntax{marked category})\\
+\syntax{optional alternative} \produces~\syntax{marked category}\vert\\
+\syntax{marked category} \produces~\syntax{category name}\opt{*}\\
+\syntax{target category} \produces~\#\syntax{integer}\\
+\syntax{target category} \produces~\syntax{category name}\\
+\endgroup
+
+# Here is the pattern that reads productions.
+In most of the  modules below, we read through some of the fields of the
+production.
+We use |i| to remember what field we are about to examine.
+When a module terminates, |$i| is left pointing to the first field of
+interest to the next module.
+#<Production patt...#>=
+#=/-->/#>	{
+	#<Set up to parse this production#>
+	#<Read through the fields of the production, up to the arrow#>
+	#<Set |lowpos|, |highpos|, and |arrowpos| to their proper values#>
+	#<Update |highestposoverall|#>
+	#<Update |highestunknownpos|#>
+	#<Check to see that left context matches#>
+	#<Process scrap to which we are translating#>
+	#<Check to see that right context matches#>
+	#<Check to make sure we used all the fields of the production#>
+	#<Compute the appropriate test for this production and put it
+		in |prodtest[prodnum]|#>
+	#<Compute the code to write the new translation, should this
+		production fire, and put it in |prodtrans[prodnum]|#>
+	#<Write the start token in |ppstart[prodnum]| and the number
+		of tokens reduced in |tokensreduced[prodnum]|#>
+	#<If we only reduced one token, write the reduction
+		 out to file |cycles| for later testing#>
+	next
+} ## \.{/-->/}
+
+# Each scrap in the production will be given a position |pos|,
+beginning with 1. (Using 1 and not 0 lets us make good use of the fact
+that uninitialized AWK variables will have value zero.)
+We will remember the positions  of the scraps that get reduced; they
+will be from |lowpos| to |highpos-1|.
+We keep track of the production number in |prodnum|, and we save a
+copy of the input line in |inputline[prodnum]|.
+#<Set up to parse this production#>=
+	lowpos=0; highpos=0; pos=1
+	prodnum=prodnum+1
+	inputline[prodnum]=$0
+	print "Parsing production", prodnum, $0 > logfile
+
+
+# This is the guts of the parsing. We have to read each field in the
+production, determine whether it is category or translation
+information, and act accordingly.
+Each scrap will be given a position |pos|.
+We will write in |test[pos]| the code needed to decide whether a
+particular scrap matches the pattern given in the production.
+Scraps can match a single category by name, a list of categories, or
+|"?"|, which every scrap matches.
+Categories can be starred, in which case we underline the index entry
+of the first identifier in the scrap's translation.
+
+We also write in |trans[pos]| the code necessary to produce the
+translations preceding the scrap at |pos|.
+
+#<Read through the fields...#>=
+trans[pos]=""
+for (i=1; i<=NF; i++) {
+	if ($i ~ #=/<.*>/#>) { ##  should be |trans_pattern|
+		#<Process a translation in |$i|#>
+	} else if ($i ~ #=/^!?[a-zA-Z_]+(\*\*?)?$/#>) { ## |cat_pattern|
+		#<Process a single category#>
+	} else if ($i ~ #=/^!?\(([a-zA-Z_]+\|)*[a-zA-Z_]+\)(\*\*?)?$/#>){
+		#<Process a list of alternative categories#>
+	} else if ($i == "?") {
+		#<Process a category wild card#>
+	} else if ($i == "[") {
+		lowpos=pos
+	} else if ($i == "]") {
+		highpos=pos
+	} else if ($i=="-->") {
+		break
+	} else { ## we don't recognize the field
+		print "Error: bad field is", $i, "in production on line", NR
+		#<Forget this production#>
+	}
+}
+i++
+
+
+# When we find a mistake, we just abandon the current production.
+Decrementing |prodnum| will make it as if this production never happened.
+#<Forget this production#>=
+	prodnum--
+	#<Punt this...#>
+
+# We process the translation and add the result to the current
+translation for |pos|.
+#<Process a translation...#>=
+transstring=$i
+selfstring="" ## senseless for productions
+wherestring= sprintf ("in production on line %d", NR)
+append_keyword="app"
+#<Take translation from |transstring| and write corresponding \.{WEAVE} code to
+|outstring|, using |selfstring| as translation of |"<*>"|#>
+trans[pos]=trans[pos] outstring
+
+# Here we'll set |test[pos]|.
+The phrase |test[pos]| will be a single C conjunct; if the test for
+each scrap is true, the whole production will fire.
+If we're called upon to make a scrap underlined or reserved, we'll add
+to |trans[pos]|.
+
+If a category is negated we add an extra clause to make
+sure nothing matches the zero category, since {\tt WEAVE} assumes
+no production ever matches a scrap with category zero.
+#<Process a single category#>=
+	field[pos]=$i ## save this field to compare RHS
+	#<Set |negation|, and remove leading |"!"| from |$i| if necessary#>
+	#<Strip stars from |$i| (if any) and add appropriate
+		translations to |trans[pos]|#>
+	cat = $i
+	categories[cat]=1 ## remember |cat| is a category
+	if (negation==0) {
+	    test[pos]=sprintf("(pp+%d)->cat==SP_%s",pos-1,cat)
+	} else {
+	    test[pos]=sprintf("((pp+%d)->cat!=SP_%s && (pp+%d)->cat != 0)",\
+			pos-1,cat,pos-1)
+	}
+	#<Update the record of the rightmost occurrence of category |cat|#>
+	#<Advance |pos|, making the new |trans[pos]| empty#>
+
+# The list of categories is enclosed in parentheses and the individual
+categories are separated by vertical bars.
+We have to make the test for these things a disjunction, but
+processing is more or less like the processing for a single category.
+
+If a list of alternatives is negated we add an extra clause to make
+sure nothing matches the zero category, since {\tt WEAVE} assumes
+no production ever matches a scrap with category zero.
+#<Process a list of alternative categories#>=
+	field[pos]=$i ## save this field to compare RHS
+	#<Set |negation|, and remove leading |"!"| from |$i| if necessary#>
+	if (negation==0) {
+		test[pos]="(" ## open for a list of good alternatives
+	} else {
+		temp=sprintf("(pp+%d)->cat==0",pos-1)
+		test[pos]="!(" temp "||" ## open for a list of bad alternatives
+	}
+	#<Strip stars from |$i| (if any) and add appropriate
+		translations to |trans[pos]|#>
+	temp = substr($i,2,length($i)-2) ## throw out parens
+	m = split(temp,tok,"|")
+	for (j=1;j<=m;j++) {
+		cat = tok[j]
+		categories[cat]=1 ## remember it's a category
+		#<Update the record of the rightmost occurrence of
+			category |cat|#>
+		temp=sprintf("(pp+%d)->cat==SP_%s",pos-1,cat)
+		test[pos]=test[pos] temp ## add alternative to test
+		if (j!=m) 
+			test[pos]=test[pos] "||\n" ## line too long errors
+	}
+	test[pos]= test[pos] ")"
+	#<Advance |pos|, making the new |trans[pos]| empty#>
+
+
+# We keep track of the rightmost occurrence of each category. 
+This enables us to backtrack by exactly the right amount when a
+production fires and creates a new scrap.
+#<Update the record of the rightmost occurrence of category |cat|#>=
+	if (pos > highestpos[cat]) {
+		highestpos[cat]=pos
+		}
+
+# If a category or lsit of alternatives is preceded by an exclamation
+point (|"!"|), we set |negation|, and we will test for scraps that are
+{\it not} of that category or are {\it not} of one of the categories
+listed.
+#<Set |negation|...#>=
+temp = substr($i,1,1)
+if (temp=="!") {
+	negation = 1
+	$i = substr($i,2)
+} else {
+	negation = 0
+}
+
+# Since both translations and tokens can add to |trans[pos]| we must
+make sure it is empty whenever we get a new |pos|. 
+This device makes that easy.
+
+#<Advance |pos|, making the new |trans[pos]| empty#>=
+	pos=pos+1
+	trans[pos]=""
+
+# If a category is single-starred, we take this construct to be the
+{\it definition} of that item, and we underline the index entry for
+this module.
+The |make_underlined| routine finds the first identifier in the
+translation of the starred scrap, and underlines the index entry for
+that identifier in this module.
+
+If a category is double-starred, we used to try to change the ilk of the
+appropriate identifier to make it a reserved word.
+The only use this ever had was in handling C typedefs, and it should
+probably be removed.
+#^mistakes#>
+In the meanwhile, double starring is like single starring.
+
+#<Strip stars from |$i| (if any) and add appropriate
+	translations to |trans[pos]|#>=
+if ($i ~ #=/^([a-zA-Z_]+|\(([a-zA-Z_]+\|)*[a-zA-Z_]+\))\*\*$/#>) { ## it's double-starred
+	temp = sprintf("\tmake_underlined(pp+%d);\n",pos-1)
+	trans[pos] = trans[pos] temp
+	$i = substr($i,1,length($i)-2)
+} else if ($i ~ #=/^([a-zA-Z_]+|\(([a-zA-Z_]+\|)*[a-zA-Z_]+\))\*$/#>) { ## it's starred
+	temp = sprintf("\tmake_underlined(pp+%d);\n",pos-1)
+	trans[pos] = trans[pos] temp
+	$i = substr($i,1,length($i)-1)
+} else if ($i ~ #=/\*$/#>) { ## a bad star?
+	print "Error: can't remove stars in production on line", NR
+	#<Forget this production#>
+}
+
+# Wild cards are easy to process, but we do have to remember that
+not even a wild card matches a scrap of category zero.
+#<Process a category wild card#>=
+	field[pos]=$i ## save this field to compare RHS
+        test[pos]=sprintf("(pp+%d)->cat!=0",pos-1) ## anything nonzero matches
+	highwildcard=pos ## we don't really need this?
+	#<Advance |pos|, making the new |trans[pos]| empty#>
+
+
+
+#
+We reach this point in the program after we will have read the arrow
+into |$i|.
+
+This module establishes in what ranges of |pos| the contexts fall:
+$$\vbox{\halign{##\hfil\tabskip1em&\hfil##\hfil\cr
+\bf Items&\bf Range\cr
+\noalign{\vskip2pt}
+left context&|1..lowpos-1|\cr
+firing instructions&|lowpos..highpos-1|\cr
+right context&|highpos..arrowpos-1|\cr
+}}$$
+If |lowpos| and |highpos| haven't been set by the appearance of square
+brackets, we set them to make the contexts empty.
+None or both should be set.
+
+
+#<Set |lowpos|, |highpos|, and |arrowpos| to their proper values#>=
+	arrowpos=pos
+	if (lowpos==0 && highpos==0) {
+		lowpos=1 ## first transform position
+		highpos=arrowpos 	## first token not reduced 
+			    	## (or one beyond last token position)
+	} else if (lowpos==0 || highpos==0) {
+		print "Error: square brackets don't balance in", \
+			"production on line", NR
+		#<Forget this production#>
+	}
+
+# Here is the efficient place to update the rightmost (highest)
+position of {\it any} category.
+#<Update |highestposoverall|#>=
+	if (arrowpos-1 > highestposoverall) { 
+			highestposoverall=arrowpos-1
+			}
+
+# Dealing with grammars in which categories can be unnamed (using
+wildcards or negation) can be a pain  in the ass.
+What we have to do, when reducing after firing a production, is move 
+backwards enough so that we don't miss any earlier productions that
+are supposed to fire.
+This means we have to move back at least far enough so that the new
+scrap will match any unnamed category.
+{\bf But} we don't have to worry about wildcards (|"?"|) at the end of
+a production, because they would have matched anyway, even before the
+current production fired. Hence:
+#<Update |highestunknownpos|#>=
+for (hup=arrowpos-1; field[hup]=="?";) {
+	hup--
+	}
+for (;hup>highestunknownpos;hup--) {
+	temp=field[hup]
+	temp=substr(temp,1,1)
+	if (temp=="?" || temp =="!") {
+		highestunknownpos=hup ## we know |hup>highestunknownpos|
+		break ## redundant, since test will fail
+	}
+}
+
+# Here is the error checking for context sensitive productions.
+#<Check to see that left context matches#>=
+	for (pos=1;pos<lowpos;pos++) {
+		#<Check |$i| against |field[pos]|#>
+		i++
+	}
+
+# #<Check to see that right context matches#>=
+	for (pos=highpos;pos<arrowpos;pos++) {
+		#<Check |$i| against |field[pos]|#>
+		i++
+	}
+# #<Check |$i| against |field[pos]|#>=
+		if (i>NF || $i != field[pos]) {
+			print "Error: token mismatch is: found", $i, \
+				"sought", field[pos], "on line", NR
+			#<Forget this...#>
+			}
+
+# We process our target scrap in between checking the left and right
+contexts.
+This scrap can be the name of a category, or it can be ``$\##nnn$'',
+where $nnn$ refers to the number of a category on the left side of the
+arrow.
+In this way it is possible to match wildcards and lists of alternatives.
+#<Process scrap to which we are translating#>=
+	## i points to the target category
+	if (i>NF) {
+		print "Error: no target category in production on line", NR
+		#<Forget this...#>
+		}
+	if ($i ~ #=/##[0-9]+/#>) { ## a number
+		$i = substr($i,2) ## peel off the \##
+		#<Make sure |1 <= $i < arrowpos|#>
+		targetcategory[prodnum]="Unnamed category"
+		temp = sprintf("(pp+%d)->cat", $i-1)
+		unnamed_cat[prodnum]=temp
+	} else if ($i ~ #=/[a-zA-Z][a-zA-Z_]*/#>) { ## a category
+		targetcategory[prodnum]=$i
+		categories[$i]=1 ## remember this is a category
+	} else {
+		print "Error: unrecognizable target token", $i, \
+			"in production on line", NR
+		#<Forget this...#>
+	}
+	i++
+
+# We call this at the end to make sure there aren't unused fields left over
+#<Check to make sure we used all the fields of the production#>=
+	if (i<=NF) {
+		print "Error: used only " i-1 " of " NF " tokens", \
+			"in production on line", NR
+		#<Forget this...#>
+		}
+
+# After having vetted the whole production, we combine the tests and
+translations for each |pos|.
+#<Compute the appropriate test for this production and put it
+		in |prodtest[prodnum]|#>=
+	prodtest[prodnum]=""
+	for (pos=1;pos<arrowpos;pos++) {
+		if (pos>1) {
+			prodtest[prodnum]=prodtest[prodnum] " &&\n\t\t"
+			}
+		prodtest[prodnum]=prodtest[prodnum] test[pos]
+		}
+
+# #<Compute the code to write the new translation, should this
+		production fire, and put it in |prodtrans[prodnum]|#>=
+	prodtrans[prodnum]=""
+	for (pos=lowpos;pos<highpos;pos++) {
+		prodtrans[prodnum]=prodtrans[prodnum] trans[pos] 
+		## add code to append this scrap
+		temp = sprintf("\tapp1(pp+%d);\n",pos-1)
+		prodtrans[prodnum]=prodtrans[prodnum] temp
+		#<If not negated, record the fact that a token of
+			category satisfying |test[pos]| could have
+			been reduced#>
+		}
+	prodtrans[prodnum]=prodtrans[prodnum] trans[highpos]
+
+# #<Write the start token in |ppstart[prodnum]| and the number
+		of tokens reduced in |tokensreduced[prodnum]|#>=
+	ppstart[prodnum]=lowpos-1
+	tokensreduced[prodnum]=highpos-lowpos
+
+# #<If we only reduced one token, write the reduction
+		 out to file |cycles| for later testing#>=
+	if (highpos-lowpos==1) {
+		printf "%d: %s --> %s\n", prodnum, field[lowpos], \
+			targetcategory[prodnum] > cycles
+		wrotecycles = 1
+		}
+
+# If we never even had the possibility of a cycle, we still have to write
+out a dummy file so the cycle checker in the Makefile won't barf.
+# #<Write lists of everything#>=
+if(wrotecycles==0) {
+	print "0: dummy --> nodummy" > cycles
+	}
+
+# For error checking, we keep track of categories that get reduced in
+productions. 
+We can't do this while scanning the production, because we don't know
+at the beginning what |lowpos| will be, since we might or might not
+ever see a left square bracket.
+
+If a particular category is never reduced, that merits a warning later on.
+#<If not negated, record the fact that a token of category satisfying
+			|test[pos]| could have been reduced#>=
+temp = field[pos]
+tempa = substr(temp,1,1)
+if (tempa != "!") {	
+	if (temp ~ #=/^\(([a-zA-Z_]+\|)*[a-zA-Z_]+\)(\*\*?)?$/#>) {
+		## list of alternatives
+		#<Remove trailing stars from |temp|#>
+		temp = substr(temp,2,length(temp)-2)
+		m = split(temp,tok,"|")
+		for (j=1;j<=m;j++) {
+			alternate = tok[j]
+			reduced[alternate]=1
+			}
+	} else if (temp ~ #=/^[a-zA-Z_]+(\*\*?)?$/#>) {
+		#<Remove trailing stars from |temp|#>
+		reduced[temp]=1
+	} else if (temp != "?") {
+		print "Confusion: unintelligible field[pos]:", temp, \
+			"in production on line", NR
+		#<Forget this...#>
+	}
+}
+
+# #<Remove trailing...#>=
+while (temp ~ #=/\*$/#>) {
+	temp = substr(temp,1,length(temp)-1)
+}
+
+# #<Check for err...#>=
+for (c in categories) {
+	if (reduced[c] != 1) {
+		print "Warning: category", c, "never reduced"
+	}
+}
+
+
+# Here's a check for the target token number
+#<Make sure |1 <= $i < arrowpos|#>=
+if ((0+$i)<1 || (0+$i)>=0+arrowpos) {
+	print "Error: can't take token number", $i, "of", arrowpos-1, \
+		"tokens", "in production on line", NR
+	#<Forget this...#>
+	}
+
+#*1Writing the scrap reduction code.
+Before writing the grammar, we want to define all of the category codes.
+#<Write out...#>=
+	print "Writing out category codes" > logfile
+	print "@ Here is a list of category codes scraps can have" > grammarfile
+	i=1
+	for (t in categories) {
+		printf "@d SP_%s = %d\n",t,i > grammarfile
+		i++
+	}
+	print "@c" > grammarfile
+# We also want to make sure we can print the names of categories in
+case we need to debug.
+#<Write out...#>=
+	print "##ifdef DEBUG" > grammarfile
+	print "##define PRINT_CAT(A,B) case A: printf(B); break" > grammarfile
+	print "print_cat(c) /* symbolic printout of a category */" > grammarfile
+	print "eight_bits c;" > grammarfile
+	print "{" > grammarfile
+	print "  switch(c) {" > grammarfile
+	for (t in categories) {
+		printf "PRINT_CAT(SP_%s,\"%s\");\n",t,t > grammarfile
+		}
+	print "    case 0: printf(\"zero\"); break;" > grammarfile
+	print "    default: printf(\"UNKNOWN\"); break;" > grammarfile
+	print "  }" > grammarfile
+	print "}" > grammarfile
+	print "##endif DEBUG" > grammarfile
+	print " " > grammarfile
+
+# And there goes the list...
+#<Write lists...#>=
+	for (c in categories) {
+		print c > categoryfile
+		}
+
+# #<Write stat...#>=
+for (c in categories) {
+	number_of_categories++
+}
+printf "You used %d different categories in %d productions.\n", \ 
+	number_of_categories, prodnum
+printf "You used %d different categories in %d productions.\n", \ 
+	number_of_categories, prodnum > logfile
+printf "The biggest production had %d scraps on its left-hand side.\n", \
+	highestposoverall
+printf "The biggest production had %d scraps on its left-hand side.\n", \
+	highestposoverall > logfile
+
+
+# We will write a list of the successfully parsed productions to a
+separate file.
+The list will include
+ production numbers, to which the user can refer
+when debugging.
+#<Write lists...#>=
+for (n=1; n<= prodnum; n++) {
+	printf "%2d: %s\n",n,inputline[n] > productions
+	}
+
+# Finally, we write out the code for all of the productions.
+Here is our first view of category checking: we want to make sure that
+each category can be appended, either by |app_scrap| or by |reduce|.
+We also want to make sure each category can be reduced by firing some
+production.
+We track these things using the arrays |appended| and |reduced|.
+
+We write the definition of |highestposoverall|, for safety.
+
+We used to write this code as a very deeply nested if-then-else,
+but that caused a yacc overflow in the generated code for C~{\tt WEAVE}.
+So now we write 
+{\tt if (...) \LB...; goto end\_prods;\RB}
+#<Write out...#>=
+print "Writing out grammar" > logfile
+print "@ Here is where we define |highestposoverall| and where we" > grammarfile
+print "check the productions." > grammarfile
+print "@d highestposoverall =", highestposoverall > grammarfile
+print "@<Test for all of the productions@>=" > grammarfile
+for (n=1; n<=prodnum; n++) {
+	if (n%5==0)
+		print "@ @<Test for all of the productions@>=" \
+			> grammarfile ## avoids overflowing \.{WEAVE} of \.{WEAVE}
+	#<Change \vert,\_, and {\tt \##} in |inputline[n]|; put results in |this_string|#>
+	#<Make |this_string| no more than 60 characters wide#>
+	printf "if (%s) {\n\t/* %d: {\\tt %s} */\n%s",\
+		prodtest[n],n,this_string,prodtrans[n] > grammarfile
+	#<Write the |reduce| call, taking note of whether the
+		category is named#>
+	print "\tgoto end_prods;" > grammarfile
+	printf "} " > grammarfile
+	}
+printf "\n" > grammarfile
+print "end_prods:" > grammarfile
+
+# We do different things for a category that is unnamed.
+#<Write the |reduce| call, taking note of whether the category is named#>=
+	ttk=targetcategory[n]
+	if (ttk == "Unnamed category") {
+#^append check#>
+		printf "\treduce(pp+%d,%d,%s,%d,%d);\n",ppstart[n],\
+			tokensreduced[n],unnamed_cat[n],\
+			1-highestposoverall,n > grammarfile
+	} else {
+		appended[ttk]=1 ## remember we appended this token
+#^append check#>
+		reduction=highestpos[ttk]
+		if (reduction<highestunknownpos) {
+			reduction = highestunknownpos
+			}
+		printf "\treduce(pp+%d,%d,SP_%s,%d,%d);\n",ppstart[n],\
+			tokensreduced[n],targetcategory[n],\
+			1-reduction,n > grammarfile
+	}
+
+# This is the place we check for errors.
+#^append check#>
+#^reduce check#>
+#<Check for errors...#>=
+for (c in categories) {
+	if (appended[c] != 1) {
+		if (c=="ignore_scrap") { ## appended by \.{WEAVE}
+			print "Warning: category", c, "never appended"
+		} else {
+			print "Error: category", c, "never appended"
+			exitcode=-1
+			}
+		}
+	}
+
+
+
+# It's desirable to put the production in a comment, but we have to
+get rid of the confusing \vert, or \.{WEAVE} will think it introduces
+code.
+We also have to escape underscores and sharp signs, otherwise \TeX\ will 
+think we want math mode.
+#<Change \vert,\_, and {\tt \##} in |inputline[n]|; put results in |this_string|#>=
+	this_string = inputline[n]
+	tempi = index(this_string,"|")
+	while (tempi != 0) {
+		tempa = substr(this_string,1,tempi-1)
+		tempb = substr(this_string,tempi+1)
+		this_string = tempa "\\vert " tempb
+		tempi = index(this_string,"|")
+		}
+        templ = ""; tempr = this_string
+	tempi = index(tempr,"_")
+	while (tempi != 0) {
+		tempa = substr(tempr,1,tempi-1)
+		tempr = substr(tempr,tempi+1)
+		templ = templ tempa "\\_"
+		tempi = index(tempr,"_")
+		}
+        this_string = templ tempr
+        templ = ""; tempr = this_string
+	tempi = index(tempr,"##")
+	while (tempi != 0) {
+		tempa = substr(tempr,1,tempi-1)
+		tempr = substr(tempr,tempi+1)
+		templ = templ tempa "\\##"
+		tempi = index(tempr,"##")
+		}
+        this_string = templ tempr
+
+
+# We have to keep these productions from making an input line too long.
+#<Make |this_string| no more than 60 characters wide#>=
+toolong=this_string; this_string=""
+while (length(toolong)>60) {
+	idx=59
+	idchar = substr(toolong,idx,1)
+	while (idx>1 && idchar!=" ") {
+		idx--
+		idchar = substr(toolong,idx,1)
+	}
+	if (idx==1) 
+		idx=59
+	temp = substr(toolong,1,idx-1)
+	toolong = substr(toolong,idx+1)
+	this_string = this_string temp "\n"
+}
+this_string = this_string toolong
+
+
+
+#*The rest of {\tt SPIDER}.
+We present the remaining features of \.{SPIDER} in them order we
+used in the ``\.{SPIDER} User's Guide.''
+#*2 Naming the target language.
+\.{SPIDER} is designed to help you build a \.{WEB} system for any
+programming language.
+We need to know the name of the language, and what extension to 
+use when writing the tangled unnamed module.
+We use this information to pick a name for the file that will hold
+this \.{WEB}'s special \TeX{} macros, and we write |"\\input webkernel"|
+on that file.
+#<Patt...#>=
+#=/^language /#>	{
+	language = $2
+	extension=language
+	for (i=3; i<NF; ) {
+		if ($i=="extension") {
+			i++
+			extension=$i
+			i++
+		} else if ($i=="version") {
+			i++
+			version=$i
+			i++
+		} else {
+			print "Error: unknown language property", $i,\
+				"on line", NR
+			#<Punt...#>
+		}
+	}
+	#<Check that we used everything#>
+	#<Write the first line of the macro file#>
+	next
+}
+
+# #<Write out...#>=
+if (language != "") {
+	print "@ Here is the language-dependent stuff" > tlang
+	if (version!="")
+		version = ", Version " version
+	printf "@d banner = \"This is %s TANGLE%s %s\\n\"\n", language, \
+		version, date > tlang
+	printf "@<Global...@>=char C_file_extension[]=\"%s\";\n", extension \
+		> tlang
+#@
+	print "@ Here is the language-dependent stuff" > wlang
+	if (version!="")
+		version = ", Version " version
+	printf "@d banner = \"This is %s WEAVE%s %s\\n\"\n", language, \
+		version, date > wlang
+	print "@<Set |out_ptr| and do a |tex_printf| to read the macros@>=" \
+		> wlang
+	printf "*out_ptr='x'; tex_printf(\"\\\\input %sweb.te\");\n", \
+		extension > wlang
+	printf "@ @<Global...@>=char C_file_extension[]=\"%s\";\n", extension \
+		> wlang
+} else {
+	print "Error: you haven't given me any \"language\" information"
+	exitcode=-1
+}
+	
+#*1Defining {\TeX} macros.
+The first thing we do after getting the language is write a line to
+the macro file.
+This makes sure the kernel \.{WEB} macros will be available.
+#<Write the first line of the macro file#>=
+	macrofile = extension "web.tex"
+	print "\\input webkernel.tex" > macrofile
+
+
+# Processing macros is straightforward: everything between \.{macros
+begin} and \.{macros end} gets copied into the macro file.
+#<Patt...#>=
+#=/^macros begin$/,/^macros end$/#> {
+	if (begunmacs==0) {
+		begunmacs=1
+		next
+	}
+	if ($0 ~ #=/^macros end$/#>) {
+		begunmacs=0
+		next
+	}
+	if (macrofile=="") {
+		if (complained==0) {
+			print "Error: you must give \"language\"",\
+				"before \"macros\""
+			complained=1
+			#<Punt...#>
+		} 
+	} else {
+		print $0 > macrofile
+	}
+	next
+}
+
+
+
+#*1Handling modules.
+We need to give module names a category, both when we define modules
+and when we use them in other modules.
+
+We might conceivably fool around with mathness, but we don't 
+really intend to do so.
+#<Pattern-action...#>=
+#=/^module /#> {
+	for (i=2;i<NF;) {
+		if ($i=="definition") {
+			i++
+			mod_def_cat=$i
+			categories[$i]=1
+			print "Module definition category set to", $i > logfile
+			i++
+		} else if ($i=="use") {
+			i++
+			mod_use_cat=$i
+			categories[$i]=1
+			print "Module use category set to", $i > logfile
+			i++
+		} else {
+			print "Error: unknown module property", $i, \
+				"on line", NR
+			#<Punt...#>
+		}
+	}
+	#<Check that we used everything#>
+	next
+}
+
+# Here's how we rig it:
+#<Write out...#>=
+if (mod_def_cat!="") {
+	print "@ @<Call |app_scrap| for a module definition@>=" > scrapfile
+	printf "app_scrap(SP_%s,no_math);\n", mod_def_cat > scrapfile
+	appended[mod_def_cat]=1
+} else {
+	print "Error: I don't know what to do with a module definition"
+	print "       Give me a \"module definition ...\""
+	exitcode=-1
+}
+if (mod_use_cat!="") {
+	print "@ @<Call |app_scrap| for a module use@>=" > scrapfile
+	printf "app_scrap(SP_%s,maybe_math);\n", mod_use_cat > scrapfile
+	appended[mod_use_cat]=1
+} else {
+	print "Error: I don't know what to do with a module use"
+	print "       Give me a \"module use ...\""
+	exitcode=-1
+}
+
+
+#*1At sign.
+With \.{SPIDER}, we can designate any character we like as the 
+``magic at sign.''
+#<Pattern-act...#>=
+#=/^at_sign /#> {
+	if (NF==2 && length($2)==1) {
+		if ($2=="@") {
+			at_sign="@@"
+		} else {
+			at_sign=$2
+			}
+	} else {
+		print "Error: I can't understand", $0
+		print "       Give me an at sign of length 1"
+		#<Punt...#>
+	}
+	next
+}
+	
+# We write the at sign out to the grammar file and to \.{TANGLE}'s token file
+#<Write out all...#>=
+	tempfile = grammarfile
+	#<Write |at_sign| definion to |tempfile|#>
+	tempfile = ttokfile
+	#<Write |at_sign| definion to |tempfile|#>
+
+# It's trivially done
+#<Write |at_sign| definion to |tempfile|#>=
+	print "@ Here is the |at_sign| for the new web" > tempfile
+	printf "@d at_sign = @`%s'\n", at_sign > tempfile
+	print " " > tempfile
+	print "@ Here is |the_at_sign| left for common" > tempfile
+	print "@<Global...@>=char the_at_sign = at_sign;" > tempfile
+	print " " > tempfile
+
+# We provide a default at sign:
+#<Set init...#>=
+	at_sign="@@"
+
+
+#*1Comments.
+We have to explain how our programming language supports comments.
+We give the strings that initiate and terminate a comment.
+We can say comments are terminated by ``newline'' if that's the case.
+#<Pattern-act...#>=
+#=/^comment /#> {
+    print $0 > logfile
+    for (i=2; i<NF;) {
+        if ($i=="begin") {
+            i++
+	    if ($i ~ #=/^<.*>$/#>) {
+                transstring = $i
+		wherestring = "in \"comment begin\" on line " NR
+                #<Convert restricted translation in |transstring| 
+                    to quoted string in |outstring|#>
+                begin_comment_string = outstring
+                i++
+	    } else {
+		print "Error: \"comment begin\" must have a restricted translation"
+		#<Punt...#>
+	    }
+        } else if ($i=="end") {
+            i++
+            if ($i=="newline") {
+                comments_end_with_newline = 1
+                end_comment_string = "\"\\n\""
+            } else if ($i ~ #=/^<.*>$/#>){
+                comments_end_with_newline = 0
+                transstring = $i
+		wherestring = "in \"comment end\" on line " NR
+                #<Convert restricted translation in 
+                    |transstring| 
+                    to quoted string in |outstring|#>
+                end_comment_string = outstring
+	    } else {
+		print "Error: \"comment end\" must have a restricted translation"
+		#<Punt...#>
+	    }
+            i++
+        } else {
+            print "Error: bad comment attribute:", $i
+            #<Punt...#>
+        } 
+    }
+    #<Check that we used everything#>
+    #<Write the comment definitions to the macro file#>
+    next
+}
+
+# \.{WEAVE} and \.{TANGLE} must be able to recognize comments.
+Here we give \.{TANGLE}
+ quoted strings that show the beginning and end of a
+comment.
+
+#<Write out...#>=
+print "@ Here we recognize the comment start seqence" > ttokfile
+print "@<See a comment starting at |loc| and skip it@>=" > ttokfile
+   printf "{int len; len=strlen(%s);\n", begin_comment_string > ttokfile
+   printf "if (loc+len<=limit && !strncmp(loc,%s,len)) {\n",\
+	 begin_comment_string > ttokfile
+   print "\tloc += len; /* a new thing */" > ttokfile
+   print "\tskip_comment(); /* scan to end of comment or newline */" > ttokfile
+   print "\tif (comment_continues || comments_end_with_newline)" > ttokfile
+   print "\t\treturn('\\n');" > ttokfile
+   print "\telse continue;\n}\n}" > ttokfile
+
+
+# Now this is \.{WEAVE} finding the start of a comment
+#<Write out...#>=
+print "@ @<See a comment starting at |loc-1| and return |begin_comment|@>=" \
+		> scrapfile
+   printf "{int len; len=strlen(%s);\n", begin_comment_string > scrapfile
+   printf "if (loc+len-1<=limit && !strncmp(loc-1,%s,len)) {\n",\
+	 begin_comment_string > scrapfile
+   print "\tloc += len-1;" > scrapfile
+   print "\t return (begin_comment); /* scan to end of comment or newline */" > scrapfile
+   print "}\n}" > scrapfile
+
+
+
+
+# Here \.{TANGLE} spots the end of a comment
+#<Write out...#>=
+print "@ Here we deal with recognizing the end of comments" > ttokfile
+printf "@d comments_end_with_newline = %d\n", comments_end_with_newline >ttokfile
+print "@<Recognize comment end starting at |loc-1|@>=" > ttokfile
+if (comments_end_with_newline != 1) {
+   printf "{int len; len=strlen(%s);\n", end_comment_string > ttokfile
+   printf "if (loc+len-1<=limit && !strncmp(loc-1,%s,len)) {\n",\
+	 end_comment_string > ttokfile
+   print "loc += len-1; return(comment_continues=0); }}" > ttokfile
+} else {
+   print "/* This code will never be executed */ " > ttokfile
+}
+
+# Now here is \.{WEAVE}.
+\.{WEAVE} copes elsewhere with the situation when
+|comments_end_with_newline| holds, so we don't need to consider it here.
+#<Write out...#>=
+printf "@ Here we recognize end of comments" > scrapfile
+printf "@d comments_end_with_newline = %d\n",comments_end_with_newline >scrapfile
+print "@<Check for end of comment@>=" > scrapfile
+   printf "{int len; len=strlen(%s);\n", end_comment_string > scrapfile
+   printf "if (loc+len-1<=limit && !strncmp(loc-1,%s,len)) {\n",\
+	 end_comment_string > scrapfile
+print " loc++; if(bal==1) {if (phase==2) app_tok('}'); return(0);}" > scrapfile
+print "  else {" > scrapfile
+print "    err_print(\"! Braces don't balance in comment\");" > scrapfile
+print "@.Braces don't balance in comment@>" > scrapfile
+print "    @<Clear |bal| and |return|@>;" > scrapfile
+print "  }" > scrapfile
+print "}" > scrapfile
+print "}" > scrapfile
+
+
+# We have to give \.{TANGLE} the beginning and ending comment strings, so
+it can use thing in writing its own comments.
+#<Write out...#>=
+	print "@ Important tokens:" > ttokfile
+	printf "@d begin_comment_string = %s\n", begin_comment_string > ttokfile
+	printf "@d end_comment_string = %s\n", end_comment_string > ttokfile
+
+# We also have to write out the starting and ending comment strings to
+the macro file. 
+We do this at the time of parsing |#=/^comment /#>|, so the user has a
+chance to override.
+#<Write the comment definitions to the macro file#>=
+if (macrofile!="") {
+   this_string=substr(begin_comment_string,2,length(begin_comment_string)-2)
+   #<Write |this_string| into |tex_string|, escaping \TeX's specials#>
+   printf "\\def\\commentbegin{%s}\n", tex_string > macrofile
+   if (comments_end_with_newline==0) {
+      this_string=substr(end_comment_string,2,length(end_comment_string)-2)
+      #<Write |this_string| into |tex_string|, escaping \TeX's specials#>
+      printf "\\def\\commentend{%s}\n", tex_string > macrofile
+   } else {
+      print "\\def\\commentend{\\relax}" > macrofile
+   }
+} else {
+	print "Error: I can't write comment info to the macro file---"
+	print "       you haven't given me any \"language\" information"
+	#<Punt...#>
+	}
+
+
+
+# Escaping \TeX's specials is pretty easy:
+#<Set initial...#>=
+texof["\\"]="\\BS"
+texof["{"]="\\{"
+texof["}"]="\\{"
+texof["$"]="\\$"
+texof["&"]="\\amp"
+texof["##"]="\\##"
+texof["^"]="\\H"
+texof["_"]="\\_"
+texof["~"]="\\TI"
+texof["%"]="\\%"
+
+# 
+#<Write |this_string| into |tex_string|, escaping \TeX's specials#>=
+tex_string=""
+while (length(this_string)>0) {
+	c = substr(this_string,1,1)
+	this_string = substr(this_string,2)
+	cprime = texof[c]
+	if (cprime=="") {
+		tex_string = tex_string c
+	} else {
+		tex_string = tex_string cprime
+	} 
+}
+
+#*1Controlling line numbering.
+Here we fart around with line numbering for \.{TANGLE}.
+This lets \.{TANGLE} write an indication of the locations of things in
+the \.{WEB} source.
+The C preprocessor accepts these things as \.{\##line} directives.
+#<Pattern-act...#>=
+#=/^line /#> {
+    print $0 > logfile
+    for (i=2; i<NF;) {
+        if ($i=="begin") {
+            i++
+	    if ($i ~ #=/^<.*>$/#>) {
+                transstring = $i
+		wherestring = "in \"line begin\" on line " NR
+                #<Convert restricted translation in |transstring| 
+                    to quoted string in |outstring|#>
+                sharp_line_open = outstring
+                i++
+	    } else {
+		print "Error: \"line begin\" must have a restricted translation"
+		#<Punt...#>
+	    }
+        } else if ($i=="end") {
+            i++
+            if ($i ~ #=/^<.*>$/#>){
+                transstring = $i
+		wherestring = "in \"line end\" on line " NR
+                #<Convert restricted translation in 
+                    |transstring| 
+                    to quoted string in |outstring|#>
+                sharp_line_close = outstring
+	    } else {
+		print "Error: \"line end\" must have a restricted translation"
+		#<Punt...#>
+	    }
+            i++
+	} else {
+		print "Error: bad line attribute:", $i, "on line", NR
+		#<Punt...#>
+	} 
+    } ## |for|
+    #<Check that we used everything#>
+    next
+}
+
+# We have to give \.{TANGLE} the strings for \&{\##line} commands.
+#<Write out...#>=
+	print "@ Important tokens:" > ttokfile
+	printf "@d sharp_line_open = %s\n", sharp_line_open > ttokfile
+	printf "@d sharp_line_close = %s\n", sharp_line_close > ttokfile
+
+# We'll choose some innocuous defaults
+#<Set init...#>=
+sharp_line_open = "\"##line\""
+sharp_line_close = "\"\""
+
+#*1Tracking the generation date.
+We want to be able to note the date on which we generate files.
+#<Patt...#>=
+#=/^date /#>	{
+	## date returned as ``Fri Dec 11 11:31:18 EST 1987''
+	mo = month[$3]
+	day = $4
+	year = $7
+	time = $5
+	#<Set |hour|, |minute|, and |ampm| from |time|#>
+	date = sprintf ("(generated at %d:%s %s on %s %d, %d)",\
+		hour, minute, ampm, mo, day, year)
+	next
+}
+
+# We want the months to have their full names
+#<Set init...#>=
+month["Jan"]="January"
+month["Feb"]="February"
+month["Mar"]="March"
+month["Apr"]="April"
+month["May"]="May"
+month["Jun"]="June"
+month["Jul"]="July"
+month["Aug"]="August"
+month["Sep"]="September"
+month["Oct"]="October"
+month["Nov"]="November"
+month["Dec"]="December"
+
+# We make a ``friendly'' time from |time=="hh:mm:ss"|.
+#<Set |hour|, |minute|, and |ampm| from |time|#>=
+	hour = substr(time,1,2)
+	if (hour >=12)
+		ampm = "PM"
+	else
+		ampm="AM"
+	
+	if (hour==0) {
+		hour =12
+	} else if (hour>12) {
+		hour = hour -12
+	}
+	minute = substr(time,4,2)
+
+
+#*=The {\tt SPIDER} tools.
+#i cycle.web
+#*Flagging duplicate names.
+Detects duplicate names in a sorted list.
+#(nodups.awk#>=
+{	if ($0==last) {
+		print "Error: duplicate name", $0, "on lines", NR-1"-"NR
+		exit -1
+		}
+	last = $0
+}
+#*Checking translation keywords for validity.
+#(transcheck.awk#>=
+#=/^good translations$/#>,#=/^test translations$/#> {
+	if ($0 !~ #=/^good translations$|^test translations$/#>) {
+		istranslation[$0]=1
+		}
+	next
+	}
+
+{	if (istranslation[$0]!=1) {
+		print "Error:", $0, "is not a valid translation"
+		exitcode = -1
+		}
+}
+
+END {
+	exit exitcode
+	}
+# This is a copy of {\tt transcheck.list}, which should be the first
+part of the input to {\tt transcheck.awk}.
+Since \.{TANGLE} will insert its own stuff, we can't use it.
+{\tt transcheck.awk} {\em could} be updated to work with the
+tangled output, though, if it seemed desirable.
+#(junk.list#>=
+good translations
+break_space
+force
+big_force
+opt
+backup
+big_cancel
+cancel
+indent
+outdent
+math_rel
+math_bin
+math_op
+test translations
+
+#*=Index.
+This is a combined index to {\tt SPIDER} and the {\tt SPIDER} tools.
+Since the {\tt SPIDER} tools are nearly trivial, it's really just
+{\tt SPIDER}.
+
+

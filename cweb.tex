@@ -1,0 +1,26 @@
+\input webkernel.tex
+\def\commentbegin{/*}
+\def\commentend{*/}
+\def\CC{\mathrel{:{:}}}
+\def\CCE{\mathrel{:{:}=}}
+\def\FE{\mathrel{/=}}
+\def\PP{\mathord{++}}
+\def\PE{\mathrel{+=}}
+\def\MM{\mathord{--}}
+\def\ME{\mathrel{-=}}
+\def\MG{\mathrel{\to}}
+\def\GG{\mathrel{>\!>}}
+\def\LL{\mathrel{<\!<}}
+\def\TE{\mathrel{\ast=}}
+\def\CE{\mathrel{\%=}}
+\def\HE{\mathrel{\uparrow=}}
+\def\AE{\mathrel{\amp=}}
+\def\OE{\mathrel{|=}}
+\let\openbraces=\{
+\let\closebraces=\}
+\def\{{\ifmmode\openbraces\else$\openbraces$\fi}
+\def\}{\ifmmode\closebraces\else$\closebraces$\fi}
+\def\?{\mathrel?}
+\def\s{\ }
+\let\LN\langle
+\let\RN\rangle

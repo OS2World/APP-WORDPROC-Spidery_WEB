@@ -1,0 +1,267 @@
+\input itemize
+\def\title{Binary tree insertion}
+\def\topofcontents{\null\vfill
+  \titlefalse % include headline on the contents page
+  \def\rheader{\hfil}
+  \centerline{\titlefont Inserting into an ordered binary tree}
+  \vfill}
+
+@*Preliminaries.
+Our object is to design a verified binary tree insertion routine.
+To make our lives easier, we will employ some simplifications:
+\itemize
+\item We will use iteration instead of recursion.
+\item We will use Dijkstra's language of guarded commands
+\item We will assume the existence of a tree data type, such that 
+	if |t| is a tree either |t| is empty (|t=emptyset|) or 
+	|t| has a left subtree, a right subtree, and a datum 
+	(|t=<<l,d,r>>|). If |t=<<l,d,r>>|, we may write |t.l| for |l|,
+|t.d| for |d|, and |t.r| for |r|.
+\item We will assume sequences; if |s| is a sequence then either |s|
+is empty (|s=empty|) or |s| is an element followed by a sequence (|s=z
+Z|).
+\item We have a membership operator |member| that will test for
+membership in sequences or trees. 
+\enditemize
+@ We want to talk about ordered binary trees, so we'll want the
+notion.
+@c
+ordered.emptyset == true;
+ordered.<<l,d,r>>==ordered.l & ordered.r &@| 
+(forall y:y member l: y<=d) &@| (forall y: y member r: y>=d);
+
+@ Our mission is to insert a datum |x| into a binary tree |T| such that
+the resulting tree is ordered.
+We'll do this by creating a new tree |t| which is ordered and the
+membership of which is the union of the membership of |t| with
+$\{x\}$.
+We don't care exactly what happens if |x| is already in the tree,
+although we could add a postcondition |x member T ==> T=t|.
+
+If we state our problem formally, we have
+@c
+{PRE: ordered.T}
+{POST: (forall y::y member t <=> y member T | y=x) & ordered.t}
+
+@ Let us develop some notion of ``insertion at a node.''
+Perhaps we can use that as a guide to weakening the postcondition and
+finding a loop invariant.
+In essence what we will want to do is select some empty subtree of
+|T|, and replace it with the tree |<<emptyset,x,emptyset>>|.
+Let us generalize, and imagine that we have a variable |s| that
+represents |T| and points at some node of |T| ``to be replaced.''
+Let |attach.t.s| denote the result of substituting |T| for the subtree
+whose root is that node.
+In particular if |s| points to the root of |T|, then |attach.t.s=t|.
+
+@ How can we compute |attach|?  We've already seen that if |s| points
+to the root of |T|, then |attach.t.s=t|.
+Suppose |s| does not point to the root of |T|.
+Then there is an |s`| that points to the parent of the node pointed to by
+|s|.
+Then, there is some |t`| such that |attach.t.s=attach.t`.s`|, and,
+furthermore, either |t`=<<t,d,u>>| or |t`=<<u,d,t>>|, for some |u| and
+|d|.
+
+So, let |s| be a sequence of records, and let each record contain:
+\itemize
+\item A choice (|left| or |right|)
+\item A datum |d|
+\item A tree |u|
+\enditemize
+and define
+@c
+attach.t.empty == t;
+attach.t.(<<left,d,u>> s) == attach.<<t,d,u>>.s;
+attach.t.(<<right,d,u>> s) == attach.<<u,d,t>>.s;
+
+@ Now we can imagine our insertion problem as being broken into two
+parts.
+First, we find the right place to insert |x|.
+This means computing an |s| such that
+|attach.<<emptyset,x,emptyset>>.s| is what we want.
+Second, we have to compute |t| so that
+|t=attach.<<emptyset,x,emptyset>>.s|.
+
+Let's imagine that we already have an |s|.
+Then, we can change our postcondition by substituting |attach.t.s| for
+|t|, and make that our loop invariant.
+We then start out with |t=<<emptyset,x,emptyset>>|, and write a loop
+that adds to |t| while removing from |s|.
+
+Since |s=empty| at the end of the loop, and since |attach.t.empty=t|, the
+invariant conjoined with the negation of the guard gives us the
+postcondition.
+I leave it for the reader to show that the loop body leaves the
+quantity |attach.t.s| unchanged.
+@c
+t := <<emptyset,x,emptyset>>;
+{invariant (forall y::y member attach.t.s <=> y member T | y=x) & 
+	ordered.(attach.t.s)}
+{bound #s}
+do s != empty ->
+	let choice, data, tree, S satisfy <<choice,data,tree>> S = s;	
+	if choice = left ->
+		t,s := <<t,data,tree>>, S
+	[] choice = right ->
+		t,s := <<tree,data,t>>, S
+	fi
+od
+{POST: (forall y::y member t <=> y member T | y=x) & ordered.t}
+@ It remains for us to compute a suitable |s| in the first part of the
+program.
+Let us write |X| for |<<emptyset,x,emptyset>>|.
+Then we must assign to |s|, establishing
+$$\hbox{| (forall y::y member attach.X.s <=> y member T
+|| y=x) & ordered.(attach.X.s)|.%
+}$$
+Since |y=x <=> y member X|, that is equivalent to
+$$\hbox{
+| (forall y::y member attach.X.s <=> y member T || y member X) &
+ordered.(attach.X.s)|.}$$
+
+Let us imagine we have a variable |t| such that |T=attach.t.s|.
+Then we need
+$$\hbox{|y member attach.X.s <=> y member attach.t.s || y member X|}$$
+Now we make use of a property of |attach|, viz.\ 
+|(forall X::y member attach.X.s <=> y member X || y member
+attach.emptyset.s)|.
+(The proof is by induction on the length of |s|.)
+From this we can get $$ \hbox{
+|t=emptyset ==> (forall y::y member attach.X.s <=> y member
+attach.t.s || y member X)|.}\eqno(1)$$ 
+This suggests the following code fragment:
+@c
+t,s := T,empty;
+{invariant T=attach.t.s & ordered.(attach.X.s)}
+do t != emptyset ->
+	/* loop body */@;
+od
+{t=emptyset & T=attach.t.s & ordered.(attach.X.s)}
+/* which, by (1), implies */
+{(forall y::y member attach.X.s <=> y member T | y=x) & ordered.(attach.X.s)}
+
+@ The question is now what loop body will maintain the invariant.
+Since in our earlier loop we made |t| larger and |s| smaller, we can
+imagine inverting that loop to get the new loop.
+We also invert the proof that the value of |attach.t.s| remains
+unchanged.
+
+@c
+{invariant T=attach.t.s & ordered.(attach.X.s)}
+do t != emptyset ->
+	if <<@tfirst guard@>>>@; ->
+		t,s := t.l, <<left,t.d,t.r>> s
+	[] <<@tsecond guard@>>>@; ->
+		t,s := t.r, <<right,t.d,t.l>> s
+	fi
+od
+@ The question remains as to what the guards must be to make the whole
+thing work.
+Taking the first branch, the weakest precondition of
+|ordered.(attach.X.s)| is 
+@c
+ordered.(attach.X.(<<left,t.d,t.r>> s))
+!<=>
+ordered.(attach.<<X,t.d,t.r>>.s)
+!<= /* by a lemma to follow */
+ordered.(attach.X.s) &
+ordered.(attach.t.s) &
+x <= t.d
+!<=
+ordered.(attach.X.s) &
+ordered.T &
+T=attach.t.s &
+x <= t.d
+
+@ So if we strengthen our invariant to include |ordered.T|, we can
+make the first guard |x<=t.d|, and the second guard |x>=t.d|, giving
+@c
+{invariant T=attach.t.s & ordered.(attach.X.s) & ordered.T}
+{bound depth.t}
+do t != emptyset ->
+	if x <= t.d ->
+		t,s := t.l, <<left,t.d,t.r>> s
+	[] x >= t.d ->
+		t,s := t.r, <<right,t.d,t.l>> s
+	fi
+od
+{t=emptyset & T=attach.t.s & ordered.(attach.X.s)}
+/* which, by (1), implies */
+{(forall y::y member attach.X.s <=> y member T | y=x) & ordered.(attach.X.s)}
+
+@ Now we have to finish the proof we started earlier.
+We use a clever trick involving inorder traversals.
+For reference, the inorder traversal is defined by
+$$\eqalign{
+|in.emptyset|&|==empty|\cr
+|in.<<l,d,r>>|&|==in.l d in.r|\cr
+}$$
+
+Suppose that
+$$ (\forall s::( \exists l,r:: (\forall t::
+	|in.(attach.t.s)=l in.t r|))) \eqno (2)$$
+(which we will show in just a moment).
+Given |s|, choose such an |l| and |r|. Then we have the lemma we need:
+@c
+ordered.(attach.<<X,t.d,t.r>>.s)
+!<=> /* by (2) */
+sorted.(l x t.d in.(t.r) r)
+!<=
+sorted.(l x r) &
+sorted.(l in.(t.l) t.d in.(t.r) r) &
+x <= t.d
+!<=>
+ordered.(attach.X.s) &
+ordered.(attach.t.s) &
+x <= t.d
+@ We prove (2) by induction on the length of |s|.
+
+If |s=empty|, then |l=empty| and |r=empty| satisfy |in.(attach.t.s)=l
+in.t r|.
+
+If |s!=empty|, then write |s=z Z|.
+Our induction hypothesis is |(exists l`,r`:: (forall
+t::in.(attach.t.Z)=l` in.t r`))|.
+If |z=<<left,data,tree>>|, then let |l=l`| and |r=data in.tree r`|.
+Then, for any |t|,
+$$\eqalign{
+in.(attach.t.s) &=
+|in.(attach.t.(<<left,data,tree>> Z))|\cr
+&=|in.(attach.<<t,data,tree>>.Z)|\cr
+&=|l` in.t data in.tree r`|\cr
+&=|l in.t r|,\cr}$$ 
+and that's the induction step.
+
+
+@*The finished program.
+Here we put the whole program together:
+@c
+{PRE:ordered.T}
+t,s,X := T, empty, <<emptyset,x,emptyset>>;
+{invariant T=attach.t.s & ordered.(attach.X.s) & ordered.T}
+{bound depth.t}
+do t != emptyset ->
+	if x <= t.d ->
+		t,s := t.l, <<left,t.d,t.r>> s
+	[] x >= t.d ->
+		t,s := t.r, <<right,t.d,t.l>> s
+	fi
+od;
+{(forall y::y member attach.X.s <=> y member T | y=x) & ordered.(attach.X.s)}
+t := X;
+{invariant (forall y::y member attach.t.s <=> y member T | y=x) & 
+	ordered.(attach.t.s)}
+{bound #s}
+do s != empty ->
+	let choice, data, tree, S satisfy <<choice,data,tree>> S = s;	
+	if choice = left ->
+		t,s := <<t,data,tree>>, S
+	[] choice = right ->
+		t,s := <<tree,data,t>>, S
+	fi
+od
+{POST: (forall y::y member t <=> y member T | y=x) & ordered.t}
+@*Index.
+
+

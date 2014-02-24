@@ -1,0 +1,383 @@
+% Copyright 1989 by Norman Ramsey, Odyssey Research Associates
+% To be used for research purposes only
+% For more information, see file COPYRIGHT
+
+%\let\plainmark=\mark
+%\def\mark#1{\message{(Marking ``#1'')}\plainmark{#1}}
+
+% standard macros for WEB listings (in addition to PLAIN.TEX)
+% rename some old favorites
+\let\amp=\&
+\let\SS=\S
+\let\PP=\P
+\let\em=\it % compatibility with latex
+
+\newif\iftwoside\twosidefalse
+\parskip 0pt % .1pt plus 0.1pt mins 0.1pt % no stretch between paragraphs
+\parindent 1em % for paragraphs and for the first line of Pascal text
+
+\font\eightrm=cmr8
+\font\sc=cmcsc10
+\let\mainfont=\tenrm
+\font\titlefont=cmr7 scaled\magstep4 % title on the contents page
+\font\ttitlefont=cmtt10 scaled\magstep2 % typewriter type in title
+\font\tentex=cmtex10 % TeX extended character set (used in strings)
+\let\idfont\it
+\let\reservedfont\bf
+
+\def\today{\ifcase\month\or
+  January\or February\or March\or April\or May\or June\or
+  July\or August\or September\or October\or November\or December\fi
+  \space\number\day, \number\year}
+
+\def\\#1{\leavevmode\hbox{\idfont#1\/\kern.05em}} % italic type for identifiers
+\def\|#1{\leavevmode\hbox{$#1$}} % one-letter identifiers look better this way
+\def\&#1{\leavevmode\hbox{\reservedfont#1\/}} % boldface type for reserved words
+\def\.#1{\leavevmode\hbox{\tentex % typewriter type for strings
+  \let\\=\BS % backslash in a string
+  \let\'=\RQ % right quote in a string
+  \let\`=\LQ % left quote in a string
+  \let\{=\LB % left brace in a string
+  \let\}=\RB % right brace in a string
+  \let\~=\TL % tilde in a string
+  \let\ =\SP % space in a string
+  \let\_=\UL % underline in a string
+  \let\&=\AM % ampersand in a string
+  #1}}
+\def\#{\hbox{\tt\char`\#}} % parameter sign
+\def\${\hbox{\tt\char`\$}} % dollar sign
+\def\%{\hbox{\tt\char`\%}} % percent sign
+\def\^{\ifmmode\mathchar"222 \else\char`^ \fi} % pointer or hat
+% circumflex accents can be obtained from \^^D instead of \^
+\def\AT!{@} % at sign for control text
+\def\@{@} % at sign in strings
+% EVERY WEAVE MUST DEFINE \? WHERE ? IS THE AT SIGN!!!!
+
+% Macros to surround text in |...|
+\def\CD{\relax\ifmmode\let\DC\egroup\hbox\bgroup\else\let\DC\relax\fi}
+\let\DC=\relax
+
+\chardef\AM=`\& % ampersand character in a string
+\chardef\BS=`\\ % backslash in a string
+\chardef\LB=`\{ % left brace in a string
+\def\LQ{{\tt\char'22}} % left quote in a string
+\chardef\RB=`\} % right brace in a string
+\def\RQ{{\tt\char'23}} % right quote in a string
+\def\SP{{\tt\char`\ }} % (visible) space in a string
+\chardef\TL=`\~ % tilde in a string
+\chardef\UL=`\_ % underline character in a string
+
+\newbox\bak \setbox\bak=\hbox to -1em{} % backspace one em
+\newbox\bakk\setbox\bakk=\hbox to -2em{} % backspace two ems
+
+\newcount\ind % current indentation in ems
+\def\0{\ifmmode\ifinner$\par % forced break
+  \hangindent\ind em\noindent\kern\ind em\ignorespaces$\fi
+  \else\par % forced break
+  \hangindent\ind em\noindent\kern\ind em\ignorespaces\fi}
+\def\1{\global\advance\ind by1\hangindent\ind em} % indent one more notch
+\def\2{\global\advance\ind by-1} % indent one less notch
+\def\3#1{\hfil\penalty#10\hfilneg} % optional break within a statement
+\def\4{\copy\bak} % backspace one notch
+\def\5{\hfil\penalty-1\hfilneg\kern2.5em\copy\bakk\ignorespaces}% optional break
+%\def\6{\ifmmode\else\par % forced break with no indentation
+%  \hangindent\ind em\noindent\kern\ind em\copy\bakk\ignorespaces\fi}
+\def\6{\ifmmode\else\par % forced break with no indentation
+  \hangindent\ind em\startline\ignorespaces\fi}
+\def\7{\Y\6} % forced break and a little extra space
+\def\8{\unskip} % no indentation--works only in code, not in |...|
+\def\startline{\noindent
+  \count255=\ind\advance\count255by-2
+  \hskip\count255 em}
+
+\let\yskip=\smallskip
+\def\note#1#2.{\Y\noindent{\hangindent2em\baselineskip10pt\eightrm#1 #2.\par}}
+\def\lapstar{\rlap{*}}
+\def\startsection{\Q\noindent{\let\*=\lapstar\bf\modstar.\quad}}
+\def\defin#1{\global\advance\ind by 2 \1\&{#1 }} % begin `define' or `format'
+\def\A{\note{See also}} % cross-reference for multiply defined section names
+\def\B{\mathopen{\.{@\commentbegin}}} % begin controlled comment
+\def\C#1{\ifmmode\gdef\XX{\null$\null}\else\gdef\XX{}\fi % C comments
+  \XX\hfil\penalty-1\hfilneg\quad
+	$\commentbegin\,${#1}$\,\commentend$\XX}
+\def\D{\defin{define}} % macro definition
+\def\F{\defin{format}} % format definition
+\def\J{\.{@\&}} % TANGLE's join operation
+\outer\def\M#1.{\MN#1.\ifon\vfil\penalty-100\vfilneg % beginning of section
+  \vskip12ptminus3pt\startsection\ignorespaces}
+\outer\def\N#1.#2.{\MN#1.\headcheck#2\headcheck
+  \edef\rhead{\uppercase{\ignorespaces\themodtitle}} % define running headline
+  \message{*\modno} % progress report
+  \edef\next{\write\cont{\thetocskip
+	\Z{\theopen\relax
+		\themodtitle}{\modno}{\noexpand\the\pageno}}}\next % to contents file
+  \ifon\startsection{\bf\ignorespaces\themodtitle.\quad}\ignorespaces}
+\def\MN#1.{\par % common code for \M, \N
+  {\xdef\modstar{#1}\let\*=\empty\xdef\modno{#1}}
+  \ifx\modno\modstar \onmaybe \else\ontrue \fi \mark{\modno}}
+\def\O#1{% octal, hex or decimal constant
+  {\def\?{\kern.2em}%
+  \def\${\ell}% long constant
+  \def\_{\cdot 10^{\aftergroup}}% power of ten
+  \def\~{\hbox{\rm\char'23\kern-.2em\it\aftergroup\?\aftergroup}}% octal
+  \def\^{\hbox{\rm\char"7D\tt\aftergroup}}% double quotes for hex constant
+  #1}}
+\def\P{\rightskip=0pt plus 100pt minus 10pt % go into Pascal mode
+  \sfcode`;=3000
+  \pretolerance 10000
+  \hyphenpenalty 10000 \exhyphenpenalty 10000
+  \global\ind=2 \1\startline}%\ \unskip}
+\def\Q{\rightskip=0pt % get out of Pascal mode
+  \sfcode`;=1500 \pretolerance 200 \hyphenpenalty 50 \exhyphenpenalty 50 }
+\def\T{\mathclose{\.{@\commentend}}} % terminate controlled comment
+\def\U{\note{This code is used in}} % cross-reference for uses of sections
+\def\X#1:#2\X{\ifmmode\gdef\XX{\null$\null}\else\gdef\XX{}\fi % section name
+  \XX$\langle\,$#2{\eightrm\kern.5em#1}$\,\rangle$\XX}
+\def\XF#1:#2\XF{\ifmmode\gdef\XX{\null$\null}\else\gdef\XX{}\fi % section name
+  \XX{\tt(#2{\eightrm\kern.5em#1})}\XX}
+\def\Y{\par\yskip}
+\def\){\hbox{\.{@\$}}} % sign for string pool check sum
+\def\]{\hbox{\.{@\\}}} % sign for forced line break
+\def\=#1{\kern2pt\hbox{\vrule\vtop{\vbox{\hrule
+        \hbox{\strut\kern2pt\.{#1}\kern2pt}}
+      \hrule}\vrule}\kern2pt} % verbatim string
+\let\~=\ignorespaces
+\let\*=*
+
+
+\def\DO{\hbox{\sl\char'044}} % slant dollar sign
+\let\G=\ge % greater than or equal sign
+\def\H{{\rm\char'136}} % hat
+\let\I=\ne % unequal sign
+\let\K=\gets % left arrow
+\let\L=\le % less than or equal sign
+\let\R=\lnot % logical not
+\let\S=\equiv % equivalence sign
+\let\TI\sim % tilde
+\let\V=\lor % logical or
+\let\W=\land % logical and
+\let\Z=\let % now you can \send the control sequence \Z
+
+
+\def\onmaybe{\let\ifon=\maybe} \let\maybe=\iftrue
+\newif\ifon \newif\iftitle \newif\ifpagesaved
+\def\lheader{\mainfont\the\pageno\eightrm\qquad\rhead\hfill\title\qquad
+  \tensy x\mainfont\topmark} % top line on left-hand pages
+\def\rheader{\tensy x\mainfont\topmark\eightrm\qquad\title\hfill\rhead
+  \qquad\mainfont\the\pageno} % top line on right-hand pages
+\def\lfooter{\hfil} % bottom line on left-hand-pages
+\def\rfooter{\hfil} % bottom line on left-hand-pages
+\def\page{\box255 }
+\def\normaloutput#1#2#3#4#5{%
+%\message{(At start top, first, and bottom marks: \topmark, \firstmark, \botmark)}%
+\shipout\vbox{
+  \iftwoside\else\ifodd\pageno\hoffset=\pageshift\fi\fi
+  \vbox to\fullpageheight{
+     \iftitle
+     \else\hbox to\pagewidth{\vbox to10pt{}%
+   	\ifodd\pageno#3\else
+		\iftwoside#2\else#3\fi
+	\fi}%
+     \fi
+     \vfill#1% parameter #1 is the page itself
+     \iftitle\global\titlefalse
+     \else\baselineskip=24pt\hbox to\pagewidth{\strut % see TeXbook p256
+	\ifodd\pageno#5\else
+		\iftwoside#4\else#5\fi
+	\fi}%
+     \fi
+  }%
+}%
+\global\advance\pageno by1
+%\message{(At end top, first, and bottom marks: \topmark, \firstmark, \botmark)}%
+}
+
+
+\def\rhead{\.{WEB} OUTPUT} % this running head is reset by starred sections
+\def\title{} % an optional title can be set by the user
+\def\topofcontents{\centerline{\titlefont\title}
+  \vfill} % this material will start the table of contents page
+\def\botofcontents{\vfill} % this material will end the table of contents page
+\def\contentspagenumber{0} % default page number for table of contents
+\newdimen\pagewidth \pagewidth=6.5in % the width of each page
+\newdimen\pageheight \pageheight=8.4in % the height of each page
+\newdimen\fullpageheight \fullpageheight=9in % page height including
+					     % headlines and footlines
+\newdimen\pageshift \pageshift=0in % shift righthand pages wrt lefthand ones
+\catcode`\@=11 % make at letter
+\def\m@g{\mag=\count@\pagewidth=6.5truein\pageheight=8.4truein
+  \fullpageheight=9truein\setpage}
+\catcode`\@=12 % make at other
+\def\setpage{\hsize\pagewidth\vsize\pageheight} % use after changing page size
+
+\edef\contentsfile{\jobname.toc } % file that gets table of contents info
+\def\readcontents{\expandafter\input \contentsfile}
+
+\newwrite\cont
+\output{\setbox0=\page % the first page is garbage
+  \openout\cont=\contentsfile
+  \write\cont{\string\catcode`\string\@=11}% a hack to make contents
+	  				   % take stuff in \.{---}
+  \global\output{\normaloutput\page\lheader\rheader\lfooter\rfooter}}
+\setpage
+\vbox to \vsize{} % the first \topmark won't be null
+% Delete as per bug report from kademan@stat.wisc.edu
+% Causes headings on first page to be missing
+% \eject
+
+\def\ch{\note{The following sections were changed by the change file:}
+  \let\*=\relax}
+\newbox\sbox % saved box preceding the index
+\newbox\lbox % lefthand column in the index
+\def\inx{\par\vskip6pt plus 1fil % we are beginning the index
+  \write\cont{} % ensure that the contents file isn't empty
+  \closeout\cont % the contents information has been fully gathered
+  \output{\ifpagesaved\normaloutput{\box\sbox}\lheader\rheader
+		\lfooter\rfooter\fi
+    \global\setbox\sbox=\page \global\pagesavedtrue}
+  \pagesavedfalse \eject % eject the page-so-far and predecessors
+  \setbox\sbox\vbox{\unvbox\sbox} % take it out of its box
+  \vsize=\pageheight \advance\vsize by -\ht\sbox % the remaining height
+  \hsize=.5\pagewidth \advance\hsize by -10pt
+    % column width for the index (20pt between cols)
+  \parfillskip 0pt plus .6\hsize % try to avoid almost empty lines
+  \def\lr{L} % this tells whether the left or right column is next
+  \output{\if L\lr\global\setbox\lbox=\page \gdef\lr{R}
+    \else\normaloutput{\vbox to\pageheight{\box\sbox\vss
+        \hbox to\pagewidth{\box\lbox\hfil\page}}}\lheader\rheader
+	\lfooter\rfooter
+    \global\vsize\pageheight\gdef\lr{L}\global\pagesavedfalse\fi}
+  \message{Index:}
+  \parskip 0pt plus .5pt
+  \outer\def\:##1, {\par\hangindent2em\noindent##1:\kern1em} % index entry
+  \def\[##1]{$\underline{##1}$} % underlined index item
+  \rm \rightskip0pt plus 2.5em \tolerance 10000 \let\*=\lapstar
+  \hyphenpenalty 10000 \parindent0pt}
+\def\fin{\par\vfill\eject % this is done when we are ending the index
+  \ifpagesaved\null\vfill\eject\fi % output a null index column
+  \if L\lr\else\null\vfill\eject\fi % finish the current page
+  \parfillskip 0pt plus 1fil
+  \def\rhead{NAMES OF THE SECTIONS}
+  \message{Section names:}
+  \output{\normaloutput\page\lheader\rheader\lfooter\rfooter}
+  \setpage
+  \def\note##1##2.{\quad{\eightrm##1 ##2.}}
+  \def\U{\note{Used in}} % cross-reference for uses of sections
+  \def\:{\par\hangindent 2em}\let\*=*}
+\def\con{\par\vfill\eject % finish the section names
+  \rightskip 0pt \hyphenpenalty 50 \tolerance 200
+  \setpage
+  \output{\normaloutput\page\lheader\rheader\lfooter\rfooter}
+  \titletrue % prepare to output the table of contents
+  \pageno=\contentspagenumber \def\rhead{TABLE OF CONTENTS}
+  \message{Table of contents:}
+  \topofcontents
+  \line{\hfil Section\hbox to3em{\hss Page}}
+  \def\Z##1##2##3{\line{{\ignorespaces##1}
+    \leaders\hbox to .5em{.\hfil}\hfil\ ##2\hbox to3em{\hss##3}}}
+  \readcontents\relax % read the contents info
+  \botofcontents \end} % print the contents page(s) and terminate
+%\tracingstats1 % temporary (during development)
+
+
+\def\vert{|}
+		
+%%% this stuff is to allow inital =,1,2,3,4 in starred modules
+%%% 	= means ``part'', don't skip page
+%%%	normal starred module is 0
+%%%		1,2,3,4 are submodules, and are indented
+%%%
+%%%	@*=	bold name in table of contents
+%%%		causes page eject
+%%%		suppresses page eject following
+%%%
+%%%	@*1,2	first level of indentation
+%%%	@*3,4	second level of indentation
+%%%
+%%%     @*1,3	cause page eject
+%%%     @*2,4	don't cause page eject
+%%%
+
+
+\newif\ifcancel\cancelfalse
+\catcode`\@=11
+\def\ifnextchar#1#2#3{\let\@tempe=#1\def\@tempa{#2}\def\@tempb{#3}\@ifnch}
+\def\@ifnch{\ifx \@tempc \@tempe\let\@tempd\@tempa\else\let\@tempd\@tempb\fi
+      \@tempd}
+\def\makethechar#1{\let\@tempc=#1}
+\catcode`\@=12
+
+\def\headcheck#1#2\headcheck{%
+	\makethechar{#1}%
+	\def\theskipper{\vfil\penalty-100\vfilneg\vskip12ptminus3pt}%
+				% skip before new module
+	\def\theopen{}% opening skip in toc entry
+	\def\thetocskip{}% vertical skip before toc entry
+	\def\themodtitle{{#2}}
+	\ifnextchar={%
+		\def\theskipper{\vfil\eject}%
+		\canceltrue
+		\def\theopen{\bf}%
+		\def\thetocskip{\vskip3ptplus1in\penalty-100
+			\vskip0ptplus-1in}%
+	}{\ifnextchar1{%
+		\cancelfalse
+		\def\theskipper{\vfil\eject}%
+		\def\theopen{\hskip2em}%
+	}{\ifnextchar2{%
+		\cancelfalse
+		\def\theopen{\hskip2em}%
+	}{\ifnextchar3{%
+		\cancelfalse
+		\def\theskipper{\vfil\eject}%
+		\def\theopen{\hskip4em}%
+	}{\ifnextchar4{%
+		\cancelfalse
+		\def\theopen{\hskip4em}%
+	}{% else 
+		\ifcancel\else
+			\def\theskipper{\vfil\eject}%
+		\fi
+		\cancelfalse
+		\def\themodtitle{#1{#2}}%
+	}}}}}%
+	\theskipper
+}
+
+
+%%%%%%%% for verbatim quoting of code
+% The following are copied from manmanc.tex and are taken from p421 of
+% the TeXbook  ... modified to \verbatim...\endverbatim
+% macros for verbatim scanning
+\chardef\other=12
+\def\ttverbatim{\begingroup
+  \catcode`\|=\other
+  \catcode`\\=\other
+  \catcode`\{=\other
+  \catcode`\}=\other
+  \catcode`\$=\other
+  \catcode`\&=\other
+  \catcode`\#=\other
+  \catcode`\%=\other
+  \catcode`\~=\other
+  \catcode`\_=\other
+  \catcode`\^=\other
+  \obeyspaces \obeylines \tt}
+{\obeyspaces\global\let =\ } % from texbook, p 381
+
+
+%\outer\def\verbatim{$$\let\par=\endgraf \ttverbatim \parskip=0pt
+%  \catcode`\|=0 \rightskip-5pc \ttfinish}
+%{\catcode`\|=0 |catcode`|\=\other % | is temporary escape character
+%  |obeylines % end of line is active
+%  |gdef|ttfinish#1^^M#2\endverbatim{#1|vbox{#2}|endgroup$$}}
+
+\outer\def\verbatimcode{\par\ttverbatim\leftskip=2em\parskip=0pt
+  \ttfinishcode}
+{\catcode`\|=0 |catcode`|\=\other % | is temporary escape character
+  |obeylines % end of line is active
+  |gdef|ttfinishcode#1^^M#2\endverbatimcode{#1|vbox{#2}|endgroup}}
+
+
+% end of manmac stuff
+

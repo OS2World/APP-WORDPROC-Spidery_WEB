@@ -1,0 +1,343 @@
+# Makefile for awkweb and ceeweb of OS/2 2.0 with emx/gcc
+# Run the file from a directory containing the master\ and awk\
+# subdirectories.  Edit this file to make the ROOT variable the
+# same as your main spider directory.
+
+# That is, the directory structure should look like:
+#   spider\
+#   spider\master\
+#   spider\awk\
+#   spider\c\
+
+
+# make -f makefile.emx [argument]
+
+CC = gcc -Zomf -Zmt -O
+O = .obj
+A = .lib
+
+LIBS =
+CFLAGS = 
+
+# Basic directory definitions
+
+ROOT = \spider
+
+C       = $(ROOT)\c
+AWK     = $(ROOT)\awk
+MASTER  = $(ROOT)\master
+DOC     = $(ROOT)\doc
+OS2     = $(ROOT)
+
+# Executables used
+
+CTANGLE   = $(ROOT)\ceetangle.exe
+CWEAVE    = $(ROOT)\ceeweave.exe
+AWKTANGLE = $(ROOT)\awktangle.exe
+AWKWEAVE  = $(ROOT)\awkweave.exe
+TEX       = tex386
+LATEX     = $(TEX) `&lplain`
+
+# Files to make
+# Note that we need ceetangle to make a new ceetangle if we do not
+#   have the C version of tangle.c--its recursive.
+
+# Also, if we lose spider.awk, it can be remade from spider.web but
+#  we need awktangle to do it.
+
+
+CEE_EXE = $(CTANGLE) $(CWEAVE)
+AWK_EXE = $(AWKTANGLE) $(AWKWEAVE)
+
+CEE_DVI = $(OS2)\ceeweave.dvi $(OS2)\ctangle.dvi
+A_DVI   = $(OS2)\awkweave.dvi $(OS2)\atangle.dvi
+AWK_DVI = $(OS2)\spider.dvi $(OS2)\cycle.dvi
+
+COMMON_DVI   = $(OS2)\common.dvi
+PATHOPEN_DVI = $(OS2)\pathopen.dvi
+
+CACM         = $(OS2)\cacm.dvi
+S_WEBMAN     = $(OS2)\s_webman.dvi
+S_MAN        = $(OS2)\s_man.dvi
+OVERVIEW     = $(OS2)\overview.dvi
+
+
+EXE = $(CEE_EXE) $(AWK_EXE)
+DVI =  $(COMMON_DVI) $(PATHOPEN_DVI) $(AWK_DVI) $(A_DVI) $(CEE_DVI)
+
+DOCS = $(CACM) $(S_WEBMAN) $(S_MAN) $(OVERVIEW)
+
+# What we want to make
+#  The default is the AWK and C versions of tangle and weave
+
+exe: $(EXE)
+
+dvi: $(DVI)
+
+docs: $(DOCS)
+
+all: $(EXE) $(DVI) $(DOCS)
+
+# This is how we make ceeweave and ceetangle
+
+$(CTANGLE): $(C)\tangle$(O) $(MASTER)\common$(O) $(MASTER)\pathopen$(O) 
+	$(CC) $(CFLAGS) -o $(CTANGLE) $(C)\tangle$(O) $(MASTER)\common$(O) \
+          $(MASTER)\pathopen$(O)
+
+$(C)\tangle$(O): $(C)\tangle.c
+	cd $(C)
+	$(CC) $(CFLAGS) -c tangle.c
+	cd $(OS2)
+
+$(C)\tangle.c: $(MASTER)\common.h $(C)\outtoks.web $(MASTER)\tangle.web
+	copy $(MASTER)\tangle.web $(C)
+	copy $(MASTER)\common.h $(C)
+	cd $(C)
+	$(CTANGLE) tangle.web
+	cd $(OS2)
+
+$(CWEAVE):  $(C)\weave$(O) $(MASTER)\common$(O) $(MASTER)\pathopen$(O)
+	$(CC) $(CFLAGS) -o $(CWEAVE) $(C)\weave$(O) $(MASTER)\common$(O) \
+          $(MASTER)\pathopen$(O)
+
+$(C)\weave$(O): $(C)\weave.c 
+	cd $(C)
+	$(CC) $(CFLAGS) -c weave.c
+	cd $(OS2)
+
+$(C)\weave.c: $(MASTER)\weave.web $(MASTER)\common.h $(C)\grammar.web
+	copy $(MASTER)\common.h $(C)
+	copy $(MASTER)\weave.web $(C)
+	cd $(C)
+	$(CTANGLE) weave $(OS2)\weave.ch
+	rm common.h weave.web
+	cd $(OS2)
+
+$(C)\grammar.web $(C)\outtoks.web $(OS2)\cweb.tex: \
+             $(MASTER)\cycle.awk $(MASTER)\spider.awk $(C)\c.spider
+	cd $(C)
+	gawk -f $(MASTER)\spider.awk c.spider
+	cat $(MASTER)\transcheck.list trans_keys.unsorted | \
+           gawk -f $(MASTER)\transcheck.awk
+	gawk -f $(MASTER)\cycle.awk < cycle.test
+	cat *.unsorted | sort | gawk -f $(MASTER)\nodups.awk
+	copy cweb.tex $(OS2)
+	cd $(OS2)
+
+# This is how we make awkweave and awktangle
+
+$(AWKTANGLE): $(AWK)\tangle$(O) $(MASTER)\common$(O) $(MASTER)\pathopen$(O) 
+	cd $(AWK)
+	$(CC) $(CFLAGS) -o $(AWKTANGLE) $(AWK)\tangle$(O) $(MASTER)\common$(O)\
+          $(MASTER)\pathopen$(O)
+	cd $(OS2)
+
+$(AWK)\tangle$(O): $(C)\tangle.c
+	cd $(AWK)
+	$(CC) $(CFLAGS) -c tangle.c
+	cd $(OS2)
+
+$(AWK)\tangle.c: $(MASTER)\common.h $(AWK)\outtoks.web $(MASTER)\tangle.web
+	copy $(MASTER)\tangle.web $(AWK)
+	copy $(MASTER)\common.h $(AWK)
+	cd $(AWK)
+	$(CTANGLE) tangle.web
+	rm $(AWK)\tangle.web $(AWK)\common.h
+	cd $(OS2)
+
+$(AWKWEAVE):  $(AWK)\weave$(O) $(MASTER)\common$(O) $(MASTER)\pathopen$(O)
+	$(CC) $(CFLAGS) -o $(AWKWEAVE) $(AWK)\weave$(O) $(MASTER)\common$(O) \
+          $(MASTER)\pathopen$(O)
+
+$(AWK)\weave$(O): $(AWK)\weave.c 
+	cd $(AWK)
+	$(CC) $(CFLAGS) -c weave.c
+	cd $(OS2)
+
+$(AWK)\weave.c: $(MASTER)\weave.web $(MASTER)\common.h $(AWK)\grammar.web
+	copy $(MASTER)\weave.web $(AWK)
+	copy $(MASTER)\common.h $(AWK)
+	cd $(AWK)
+	$(CTANGLE) weave $(OS2)\weave.ch
+	cd $(OS2)
+
+$(AWK)\grammar.web $(AWK)\outtoks.web $(OS2)\awkweb.tex:  \
+                  $(MASTER)\cycle.awk $(MASTER)\spider.awk $(AWK)\awk.spider
+	cd $(AWK)
+	gawk -f $(MASTER)\spider.awk awk.spider
+	cat $(MASTER)\transcheck.list trans_keys.unsorted | \
+           gawk -f $(MASTER)\transcheck.awk
+	gawk -f $(MASTER)\cycle.awk < cycle.test
+	cat *.unsorted | sort | gawk -f $(MASTER)\nodups.awk
+	copy awkweb.tex $(OS2)
+	cd $(OS2)
+
+$(MASTER)\spider.awk: $(MASTER)\spider.web
+	cd $(MASTER)
+	$(AWKTANGLE) $(MASTER)\spider.web
+	cd $(OS2)
+
+
+# This is how we make the files needed for all executables
+
+$(MASTER)\pathopen$(O): $(MASTER)\pathopen.c
+	cd $(MASTER)
+	$(CC) $(CFLAGS) -c pathopen.c
+	cd $(OS2)
+
+$(MASTER)\pathopen.c $(MASTER)\pathopen.h: $(MASTER)\pathopen.web
+	cd $(MASTER)
+	$(CTANGLE) pathopen.web
+	cd $(OS2)
+
+# Note the OS2 change file here
+
+$(MASTER)\common.c: $(MASTER)\common.web $(OS2)\common.ch
+	cd $(MASTER)
+	$(CTANGLE) common.web $(OS2)\common.ch
+	cd $(OS2)
+
+$(MASTER)\common$(O): $(MASTER)\common.c 
+	cd $(MASTER)
+	$(CC) $(CFLAGS) -c common.c
+	cd $(OS2)
+
+$(OS2)\common.dvi: $(MASTER)\common.tex $(OS2)\cweb.tex
+	copy $(MASTER)\common.tex $(OS2)
+	-$(TEX) common.tex
+	rm $(OS2)\common.tex 
+
+$(MASTER)\common.tex: $(MASTER)\common.web $(MASTER)\pathopen.h $(CWEAVE)
+	cd $(MASTER)
+	$(CWEAVE) common.web
+	cd $(OS2)
+
+$(OS2)\pathopen.dvi: $(MASTER)\pathopen.tex $(OS2)\cweb.tex
+	copy $(MASTER)\pathopen.tex $(OS2)
+	-$(TEX) pathopen.tex
+	rm $(OS2)\pathopen.tex 
+
+$(MASTER)\pathopen.tex: $(MASTER)\pathopen.web $(CWEAVE)
+	cd $(MASTER)
+	$(CWEAVE) pathopen.web
+	cd $(OS2)
+
+$(OS2)\cycle.dvi: $(MASTER)\cycle.tex $(OS2)\awkweb.tex
+	copy $(MASTER)\cycle.tex $(OS2)
+	-$(TEX) cycle.tex
+	rm $(OS2)\cycle.tex 
+
+$(MASTER)\cycle.tex: $(MASTER)\cycle.web $(AWKWEAVE)
+	cd $(MASTER)
+	$(AWKWEAVE) cycle.web
+	cd $(OS2)
+
+$(OS2)\spider.dvi: $(MASTER)\spider.tex $(OS2)\awkweb.tex
+	copy $(MASTER)\spider.tex $(OS2)
+	-$(TEX) spider.tex
+	rm $(OS2)\spider.tex 
+
+$(MASTER)\spider.tex: $(MASTER)\spider.web $(AWkWEAVE)
+	cd $(MASTER)
+	$(AWKWEAVE) spider.web
+	cd $(OS2)
+
+$(OS2)\atangle.dvi: $(AWK)\atangle.tex $(OS2)\cweb.tex
+	copy $(AWK)\atangle.tex $(OS2)
+	-$(TEX) atangle.tex
+	rm $(OS2)\atangle.tex 
+
+$(AWK)\atangle.tex: $(MASTER)\tangle.web $(AWK)\outtoks.web
+	cd $(AWK)
+	copy $(MASTER)\common.h $(AWK)
+	copy $(MASTER)\tangle.web $(AWK)
+	$(CWEAVE) tangle.web
+	rename tangle.tex atangle.tex
+	cd $(OS2)
+
+$(OS2)\awkweave.dvi: $(AWK)\awkweave.tex $(OS2)\cweb.tex
+	copy $(AWK)\awkweave.tex $(OS2)
+	-$(TEX) awkweave.tex
+	rm $(OS2)\awkweave.tex 
+
+$(AWK)\awkweave.tex: $(MASTER)\weave.web $(AWK)\grammar.web $(OS2)\weave.ch
+	cd $(AWK)
+	copy $(MASTER)\common.h $(AWK)
+	copy $(MASTER)\weave.web $(AWK)
+	$(CWEAVE) weave.web $(OS2)\weave.ch
+	rename weave.tex awkweave.tex
+	cd $(OS2)
+
+$(OS2)\ceeweave.dvi: $(C)\ceeweave.tex $(OS2)\cweb.tex
+	copy $(C)\ceeweave.tex $(OS2)
+	-$(TEX) ceeweave.tex
+	rm $(OS2)\ceeweave.tex 
+
+$(C)\ceeweave.tex: $(MASTER)\weave.web $(C)\grammar.web $(OS2)\weave.ch
+	cd $(C)
+	copy $(MASTER)\common.h $(C)
+	copy $(MASTER)\weave.web $(C)
+	$(CWEAVE) weave.web $(OS2)\weave.ch
+	rename weave.tex ceeweave.tex
+	cd $(OS2)
+
+# I wanted to call this ceetangle.dvi, but tex386 only understands
+# the 8.3 filenames right now so ceetangle was one character too long.
+
+$(OS2)\ctangle.dvi: $(C)\ctangle.tex $(OS2)\cweb.tex
+	copy $(C)\ctangle.tex $(OS2)
+	-$(TEX) ctangle.tex
+	rm $(OS2)\ctangle.tex 
+
+$(C)\ctangle.tex: $(MASTER)\tangle.web $(C)\outtoks.web
+	cd $(C)
+	copy $(MASTER)\common.h $(C)
+	copy $(MASTER)\tangle.web $(C)
+	$(CWEAVE) tangle.web
+	rename tangle.tex ctangle.tex
+	cd $(OS2)
+
+# This cleanup applies to the root directoru, master\, c\, and awk\.
+
+clean:
+	cd $(AWK)
+	-rm  -f tangle.* weave.* common.* 
+	-rm  -f *.unsorted *.list grammar.web outtoks.web scraps.web 
+	-rm  -f cycle.test spider.slog *.obj
+	-rm  -f *.c *.o *.tex *.toc *.dvi *.log *.makelog *~ *.wlog *.printlog
+	cd $(C)
+	-rm  -f tangle.* weave.* common.* 
+	-rm  -f *.unsorted *.list grammar.web outtoks.web scraps.web 
+	-rm  -f cycle.test spider.slog *.obj
+	-rm  -f *.c *.o *.tex *.toc *.dvi *.log *.makelog *~ *.wlog *.printlog
+	cd $(MASTER)
+	-rm  -f *.tex *.obj common.c
+	cd $(OS2)
+	-rm  -f *.dvi *.log *.toc
+
+$(CACM): $(DOC)\cacm.tex
+	copy $(DOC)\cacm.* $(OS2)
+	-$(LATEX) cacm
+	-rm  -f cacm.tex cacm.aux cacm.log 
+
+$(S_WEBMAN): $(DOC)\spiderwebman.tex
+	copy $(DOC)\spiderwebman.tex $(OS2)\s_webman.tex
+	-$(TEX) s_webman.tex
+	-rm  -f *.log *.aux s_webman.tex
+
+$(S_MAN): $(DOC)\spiderman.tex
+	copy $(DOC)\spiderman.tex $(OS2)\s_man.tex
+	-$(LATEX) s_man.tex
+	-$(LATEX) s_man.tex
+	-rm  -f *.log *.aux s_man.tex
+
+$(OVERVIEW): $(DOC)\overview.tex
+	copy $(DOC)\overview.tex $(OS2)
+	-$(LATEX) overview.tex
+	-$(LATEX) overview.tex
+	-rm  -f *.log *.aux overview.tex
+
+
+
+
+

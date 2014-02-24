@@ -1,0 +1,443 @@
+\message{OK, entering \string\batchmode...}
+\batchmode
+\overfullrule0pt
+\input enumerate
+\def\VC#1#2{{\enumerate\item #1\endenumerate\par}{$>\!\!>$\ #2\par}}
+%\parindent=0pt\parskip=0.5\baselineskip
+\let\maps\rightarrow
+\def\title{A Generic Stack Package}
+
+@*Stacks.
+The idea is to implement, and to prove part of, a simple stack package.
+We write a Larch trait for the stacks,
+we use terms of that trait to specify our package.
+ In the package body we write down an explicit
+representation invariant |invar| and an explicit abstraction function
+|abstraction|, and we use them to prove the package \`a la Hoare.
+The package specification refers only to the abstract trait,
+and our software will automatically perform the translation required
+to introduce explicit invariants and abstraction functions in the
+package body.
+
+@*Theory of stacks.
+We use the following theory:
+%\input stacktrait.pretty
+
+
+@*Specification.
+We now use the |Stack_theory| trait to specify a package.
+The phrase 
+|with trait Stack_theory|
+makes the |Stack_theory| trait visible and
+the phrase
+|based on stack|
+makes the sort |stack| from |Stack_theory| the abstract sort |stack'ABSTRACT|. 
+We also use the |element| sort to represent the private type |element|.
+% ACK! What proof obligations does this give?
+
+In the package {\it specification}, all terms of type |stack| are
+specified with terms of type |Stacks_theory.stack|.
+In the package {\it body}, we will specify terms of type |stack| with
+terms of a sort corresponding to the private type of stack (in this
+instance, a record type).
+We will provide an abstraction function from terms of the record trait
+to terms of the stack trait, and an invariant function from terms of
+the record trait to |boolean|.
+@c@0
+generic
+        type element is private; 
+        length: natural := 100;
+package stacks is
+	
+        type stack is private;
+@/	
+        overflow, underflow: exception;
+@#
+        function empty_stack return stack;
+        
+
+@#
+        function pushit(s:stack; e:element) return stack;
+        
+        
+        
+        
+@#
+        function popit(s:stack) return stack;
+        
+        
+        
+        
+@#
+        function topit(s:stack) return element;
+        
+        
+        
+        
+@#
+    function isEmpty(s:stack) return boolean;
+	
+	
+	
+
+private
+    subtype stack_range is natural range 0.. length - 1;
+    type stack_array is array(stack_range) of element;
+    type stack is
+    record
+	l: natural;	-- length
+	a: stack_array;	--stack
+    end record;
+
+end stacks;
+@*Implementation.
+We break the implementation into pieces so we can discuss them one at
+a time.
+
+Within the hidden part of the package, |stack| will stand for the
+concrete type (or sort), |stack'CONCRETE|.
+Outside, in the specification, |stack| will stand for the abstract
+type (or sort), |stack'ABSTRACT|.
+We use types in actual Ada code, and sorts in annotations and virtual
+functions.
+
+@c
+generic
+        type element is private;
+        length: natural := 100;
+package body stacks is
+@<Abstraction and invariants@>@;
+@<Implementation of |empty_stack|@>@;
+@<Implementation of |pushit|@>@;
+@<Implementation of |popit|@>@;
+@<Implementation of |topit|@>@;
+@<Implementation of |isEmpty|@>@;
+end stacks;
+@ Here we make explicit the representation invariant |invar| and the
+abstraction function |abstraction|.
+These are virtual functions, and templates for them will be generated
+automatically from the package specification.
+These functions will appear in the annotations for the operations of
+the package, which will also have been translated from the package
+specification.
+
+The invariant requires only that the length be within sensible bounds.
+(I have ignored the problem of definedness throughout the example.)
+The abstraction function works by peeling off the top element, and
+pushing it onto the abstraction of what's left.
+This works all the way down to |s.l=0|, for which the abstraction is
+|new_stack|.
+
+The templates for |invar| and |abstraction| are generated
+automatically.
+
+@<Abstraction...@>=
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@ To implement |empty_stack| we return a stack of length zero.
+
+@<Implementation of |empty_stack|@>=
+function empty_stack return stack
+
+
+
+
+
+is
+	empty: stack;
+begin
+	empty.l := 0;
+        return empty;
+end empty_stack;
+
+@*Proof of |empty_stack|.
+Here and elsewhere we will use the notation |@@return| to denote the return
+value.
+Predicate transformation of the postcondition leaves the following verification
+condition:
+\VC{|true|}{|invar(empty) and abstraction(empty)=new_stack|}
+
+We split and get
+\VC{|true|}{|invar(empty)|}
+and, expanding
+\VC{|true|}{|0<=empty.l and empty.l <= length|}
+and substituting for |empty.l| (on what basis?)
+\VC{|true|}{|0<=0 and 0 <= length|}
+from which
+\VC{|true|}{|true|}
+because of the property |0<=n| for any natural number |n|.
+
+The second verification condition is
+\VC{|true|}{|abstraction(empty)=new_stack|}
+We expand |abstraction|, spawning the new VC
+\VC{|true|}{|invar(empty)|}
+for which we can refer to the earlier proof.
+We are left with
+\VC{|true|}{|if empty.l=0 then new_stack else
+         push(abstraction(empty[l=>l-1]),empty.a(empty.l));
+     end if = new_stack;|}
+Which rewrites to
+\VC{|true|}{|new_stack=new_stack|}
+
+
+@ Here we have to check for overflow, but there are really no surprises.
+@<Implementation of |pushit|@>=
+function pushit(s:stack; e:element) return stack
+
+
+
+
+
+
+is
+        t: stack;
+begin
+        if s.l=length then raise overflow; end if;
+        t.l := s.l+1;
+        t.a := s.a;
+        t.a(t.l) := e;
+        return t;
+end empty_stack;
+
+@*Predicate transformation of |pushit|.
+Here we have ignored the possibility of abnormal termination.
+
+I've written intermediate conditions in between the statements to
+which they apply.
+The predicate transformation rules I've used are completely
+informal.
+
+
+@c
+function pushit(s:stack; e:element) return stack
+
+
+
+
+
+
+
+is
+        t: stack;
+begin
+
+
+
+        if s.l=length then raise overflow; end if;
+
+
+        t.l := s.l+1;
+
+
+        t.a := s.a;
+
+
+        t.a(t.l) := e;
+
+
+        return t;
+
+
+end empty_stack;
+
+@*Proof of |pushit|.
+We're going to make heavy use of a (nonexistent) theory of records.
+Record states are as in Anna;
+informally they behave just as you would think.
+
+We first rewrite the term involving |t| into a simpler and more useful
+form:
+$$\vbox{\noindent
+|t[l=>s.l+1;a=>s.a;a(l)=>e]| rewrites to
+|s[l=>l+1;a(l)=>e]|.
+}$$
+
+
+After this simplification we have this verification condition:
+\VC{|
+invar(s)|\item 
+|not (size(abstraction(s)) = length)|}
+{|
+s.l /= length and
+invar(s[l=>l+1;a(l)=>e]) and
+abstraction(s[l=>l+1;a(l)=>e])=push(abstraction(s),e)
+|}
+We'll tackle one conjunct at a time.
+
+@ {\it First conjunct.}
+We begin by proving a lemma about |size|:
+\VC{|invar(s)|}
+{|size(abstraction(s))|$\simeq$|s.l|}
+The proof is by type induction on the predefined type |natural|.
+We omit it here.
+
+Once we have the |size| lemma we rewrite the VC for the first conjunct as:
+\VC{|
+invar(s)|\item 
+|not (s.l = length)|}
+{|s.l /= length|}
+The proof is by the laws (not stated) for |=| and |/=|.
+
+@ {\it Second Conjunct.}
+Again we apply the |size| lemma.
+\VC{|
+invar(s)|\item 
+|not (s.l = length)|}
+{|
+invar(s[l=>l+1;a(l)=>e])|}
+Expanding the definition of |invar| in the hypothesis and the conclusion yields
+\VC{|
+0<=s.l and s.l <= length|\item 
+|not (s.l = length)|}
+{|
+0<=s[l=>l+1;a(l)=>e].l and
+s[l=>l+1;a(l)=>e].l<=length
+|}
+and we again exploit the theory of records to rewrite as
+\VC{|
+0<=s.l and s.l <= length|\item 
+|not (s.l = length)|}
+{|
+0<=s.l+1 and
+s.l+1<=length
+|}
+And the proof follows by |and|-splitting hypotheses and conclusion and by
+applying the laws of arithmetic.
+
+@ {\it Third conjunct.}
+This is the interesting part.
+We expand the definition of |abstraction| on the left hand side of the
+conclusion.
+This spawns a VC showing that the argument to |abstraction| satisfies
+|invariant|, but we did that earlier.
+
+\VC{|
+invar(s)|\item 
+|not (size(abstraction(s)) = length)|}
+{|
+if s[l=>l+1;a(l)=>e].l=0 then new_stack else
+push(abstraction(s[l=>l+1;a(l)=>e;l=>l-1]),
+s[l=>l+1;a(l)=>e].a(s[l=>l+1;a(l)=>e].l)) end if
+ =push(abstraction(s),e)
+|}
+and, rewriting according to the theory of records
+(especially
+|s[l=>l+1;a(l)=>e].a(s[l=>l+1;a(l)=>e].l)|
+rewrites to
+|s[l=>l+1;a(s.l+1)=>e].a(s.l+1)|
+which rewrites to |e|):
+\VC{|
+invar(s)|\item 
+|not (size(abstraction(s)) = length)|}
+{|
+if s.l+1=0 then new_stack else
+push(abstraction(s[a(l+1)=>e]),e) end if
+ =push(abstraction(s),e)
+|}
+Applying the laws of natural numbers we have
+\VC{|
+invar(s)|\item 
+|not (size(abstraction(s)) = length)|}
+{|
+push(abstraction(s[a(l+1)=>e]),e) = push(abstraction(s),e)
+|}
+
+
+And now we show by a lemma that
+\VC{|invar(s)|\item |s.l/=length|}
+{
+|abstraction(s[a(l+1)=>e])|$\simeq$|abstraction(s)|
+}
+which is sufficient.
+The proof of the lemma is by induction over |l| (type induction of the
+predefined type |natural|).
+
+
+
+
+@ @<Implementation of |popit|@>=
+function popit(s:stack) return stack 
+
+
+        
+	
+        
+
+is
+	t: stack;
+begin
+        if s.l=0 then raise underflow; end if;
+        t := s;
+        t.l := t.l-1;
+        return t;
+end popit;
+
+@ @<Implementation of |topit|@>=
+function topit (s:stack) return element 
+
+
+
+
+is
+begin
+        if s.l=0 then raise underflow; end if;
+        return s.a(s.l);
+end topit;
+
+@ @<Implementation of |isEmpty|@>=
+    function isEmpty(s:stack) return boolean 
+	
+	
+	
+	
+	is
+    begin
+	return s.l=0;
+    end isEmpty;
+@ Predicate transformation of isEmpty.
+@c
+    function isEmpty(s:stack) return boolean 
+	
+	
+	
+	
+    is
+    begin
+	
+	return s.l=0;
+	
+    end isEmpty;
+
+@ Proof of isEmpty.
+\VC{|invariant(s)|}{|s.l=0 =is_empty(abstraction(s))|}
+Expanding |abstraction(s)|,
+\VC{|invariant(s)|}{|s.l=0 =is_empty(if s.l=0 then nil
+		else cons(abstraction(s[l=>l-1]),l.a(s.l-1)))|}
+Simplifying,	
+\VC{|invariant(s)|}{|(s.l=0)=if s.l=0 then is_empty(nil)
+	else is_empty(cons(abstraction(s[l=>l-1]),l.a(s.l-1)))|}
+which we can rewrite as
+\VC{|invariant(s)|}{|(s.l=0)=if s.l=0 then true
+	else is_empty(cons(abstraction(s[l=>l-1]),l.a(s.l-1)))|}
+Simplifying,
+\VC{|invariant(s)|}{|true|}
+
+
+@*Index.
+This is an index of all the identifiers used in the program.
+The numbers are section numbers, not page numbers.

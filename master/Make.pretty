@@ -1,0 +1,18 @@
+# Copyright 1989 by Norman Ramsey, Odyssey Research Associates
+# To be used for research purposes only
+# For more information, see file COPYRIGHT in the parent directory
+
+WEBDIR=/usr/norman/web/src/master
+
+.SUFFIXES: .ada .larch .pretty
+
+.ada.pretty:
+	cat $(WEBDIR)/webhead $*.ada $(WEBDIR)/webtail > $*.web
+	aweave $*
+	awk -f $(WEBDIR)/pretty.awk < $*.tex > $*.pretty
+
+.larch.pretty:
+	cat $(WEBDIR)/webhead $*.larch $(WEBDIR)/webtail > $*.web
+	lweave $*
+	awk -f $(WEBDIR)/pretty.awk < $*.tex > $*.pretty
+

@@ -1,0 +1,145 @@
+# Copyright 1989 by Norman Ramsey, Odyssey Research Associates.
+# To be used for research purposes only.
+# For more information, see file COPYRIGHT in the parent directory.
+
+HOME=/u/nr#			# Make no longer inherits environment vars
+
+THETANGLE=tangle
+THEWEAVE=weave
+SPIDER=any.spider
+#
+DVI=dvi
+CFLAGS=-DDEBUG -g -DSTAT
+
+# CPUTYPE is a grim hack that attempts to solve the problem of multiple
+# cpus sharing a file system.  In my environment I have to have different
+# copies of object and executable for vax, sun3, next, iris, and other 
+# cpu types.  If you will be using Spidery WEB in a homogenous processor
+# environment, you can just set CPUTYPE to a constant, or eliminate it 
+# entirely.  
+#
+# In my environment, the 'cputype' program returns a string that
+# describes the current processor.  That means that the easiest thing
+# for you to do is to define a 'cputype' program that does something
+# sensible.  A shell script that says 'echo "vax"' is fine.
+
+CPUTYPE=`cputype`
+
+# Change the following three directories to match your installation
+#
+# the odd placement of # is to prevent any trailing spaces from slipping in
+
+WEBROOT=$(HOME)/web/src# 	# root of the WEB source distribution
+DEST=$(HOME)/bin/$(CPUTYPE)#	 	# place where the executables go
+MACROS=$(HOME)/tex/macros/web# 	# place where the macros go
+
+MASTER=$(WEBROOT)/master# 	# master source directory
+OBDIR=$(MASTER)/$(CPUTYPE)#	# common object files
+
+TANGLESRC=tangle
+CTANGLE=ceetangle -I$(MASTER)
+CWEAVE=ceeweave -I$(MASTER)
+AWKTANGLE=awktangle -I$(MASTER)
+COMMONOBJS=$(OBDIR)/common.o $(OBDIR)/pathopen.o
+COMMONC=$(MASTER)/common.c $(MASTER)/pathopen.c
+COMMONSRC=$(COMMONC) $(MASTER)/spider.awk
+
+
+
+# Our purpose is to make tangle and weave
+
+web: tangle weave
+
+tangle: $(COMMONOBJS) $(TANGLESRC).o
+	$(CC) $(CFLAGS) -o $(DEST)/$(THETANGLE) $(COMMONOBJS) $(TANGLESRC).o
+
+weave: $(COMMONOBJS) weave.o
+	$(CC) $(CFLAGS) -o $(DEST)/$(THEWEAVE) $(COMMONOBJS) weave.o
+
+
+source: $(TANGLESRC).c $(COMMONSRC) # make tangle.c and common src, then clean
+	if [ -f WebMakefile ]; then exit 1; fi  # don't clean the master!
+	if [ -f spiderman.tex ]; then exit 1; fi # don't clean the manual
+	-rm -f tangle.web weave.* common.* # remove links that may be obsolete
+	-rm -f *.unsorted *.list grammar.web outtoks.web scraps.web 
+	-rm -f cycle.test spider.slog
+	-rm -f *.o *.tex *.toc *.dvi *.log *.makelog *~ *.wlog *.printlog
+
+# Here is how we make the common stuff
+
+$(MASTER)/common.c: $(MASTER)/common.web # no change file
+	$(CTANGLE) $(MASTER)/common 
+
+$(OBDIR)/common.o: $(MASTER)/common.c $(OBDIR)
+	$(CC) $(CFLAGS) -c $(MASTER)/common.c
+	mv common.o $(OBDIR)
+
+
+$(MASTER)/pathopen.c: $(MASTER)/pathopen.web # no change file
+	$(CTANGLE) $(MASTER)/pathopen 
+	mv pathopen.h $(MASTER)
+
+$(OBDIR)/pathopen.o: $(MASTER)/pathopen.c $(OBDIR)
+	$(CC) $(CFLAGS) -c $(MASTER)/pathopen.c
+	mv pathopen.o $(OBDIR)
+
+$(OBDIR):
+	if /bin/test ! -d $(OBDIR) ; then mkdir $(OBDIR) ; fi
+
+## Now we make the tangle and weave source locally
+
+$(TANGLESRC).c: $(MASTER)/$(TANGLESRC).web $(MASTER)/common.h grammar.web
+	-/bin/rm -f $(TANGLESRC).web
+	ln $(MASTER)/$(TANGLESRC).web $(TANGLESRC).web
+#	chmod -w $(TANGLESRC).web
+	$(CTANGLE) $(TANGLESRC)
+
+weave.c: $(MASTER)/weave.web $(MASTER)/common.h grammar.web 
+	-/bin/rm -f weave.web
+	ln $(MASTER)/weave.web weave.web
+#	chmod -w weave.web
+	$(CTANGLE) weave 
+
+## Here's where we run SPIDER to create the source
+
+grammar.web: $(MASTER)/cycle.awk $(MASTER)/spider.awk $(SPIDER)
+	echo "date" `date` | cat - $(SPIDER) | awk -f $(MASTER)/spider.awk
+	cat $(MASTER)/transcheck.list trans_keys.unsorted | awk -f $(MASTER)/transcheck.awk
+	awk -f $(MASTER)/cycle.awk < cycle.test
+	sort *.unsorted | awk -f $(MASTER)/nodups.awk
+	mv *web.tex $(MACROS)
+
+## We might have to make spider first.
+
+$(MASTER)/spider.awk: $(MASTER)/spider.web
+	$(AWKTANGLE) $(MASTER)/spider
+	mv cycle.awk nodups.awk transcheck.awk $(MASTER)
+	rm junk.list
+
+
+# $(MASTER)/cycle.awk: $(MASTER)/cycle.web # making spider also makes cycle
+# 	$(AWKTANGLE) $(MASTER)/cycle
+
+
+# This cleanup applies to every language
+
+clean:
+	if [ -f WebMakefile ]; then exit 1; fi # don't clean the master!
+	if [ -f spiderman.tex ]; then exit 1; fi # don't clean the manual
+	-rm -f tangle.* weave.* common.* # remove links that may be obsolete
+	-rm -f *.unsorted *.list grammar.web outtoks.web scraps.web 
+	-rm -f cycle.test spider.slog
+	-rm -f *.c *.o *.tex *.toc *.dvi *.log *.makelog *~ *.wlog *.printlog
+
+
+
+# booting the new distribution
+boot:
+	cd ../master; rm -f *.o; for i in $(COMMONC); do \
+		$(CC) $(CFLAGS) -c $$i; \
+		mv *.o $(OBDIR) ; \
+	done; cd ../c
+	$(CC) $(CFLAGS) -c $(TANGLESRC).c; \
+	$(CC) $(CFLAGS) -o $(DEST)/$(THETANGLE) $(COMMONOBJS) $(TANGLESRC).o
+
+ 

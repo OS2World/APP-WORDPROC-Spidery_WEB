@@ -1,0 +1,3249 @@
+% Copyright 1989 by Norman Ramsey, Odyssey Research Associates
+% To be used for research purposes only
+% For more information, see file COPYRIGHT in the parent directory
+
+% This file is part of Spidery WEB
+% This program by Norman Ramsey is based on programs Silvio Levy
+% and D. E. Knuth.  Silvio Levy wrote most of the code.
+% It is distributed WITHOUT ANY WARRANTY, express or implied.
+% Dec 1987
+
+% Here is TeX material that gets inserted after \input webmac
+
+\message{Entering \string\batchmode...}
+\batchmode
+
+\def\hang{\hangindent 3em\indent\ignorespaces}
+\font\ninerm=cmr9
+\let\mc=\ninerm % medium caps
+\def\cee{C}
+\def\Pascal{Pascal}
+\def\PASCAL{Ada}
+\def\pb{$\.|\ldots\.|$} % C brackets (|...|)
+\def\v{\.{\char'174}} % vertical (|) in typewriter font
+\def\dleft{[\![} \def\dright{]\!]} % double brackets
+\mathchardef\RA="3221 % right arrow
+\mathchardef\BA="3224 % double arrow
+\def\({} % kludge for alphabetizing certain module names
+
+\def\title{Spidery WEAVE}
+\def\contentspagenumber{1} % should be odd
+\def\topofcontents{\null\vfill
+  \titlefalse % include headline on the contents page
+  \def\rheader{\hfil}
+  \centerline{\titlefont The {\ttitlefont Spidery WEAVE} processor}
+  \vfill}
+\pageno=\contentspagenumber \advance\pageno by 1
+\let\maybe=\iftrue
+
+@* Introduction.
+\.{CWEAVE} has a fairly straightforward outline.  It operates in
+three phases: first it inputs the source file and stores cross-reference
+data, then it inputs the source once again and produces the \TeX\ output
+file, and finally it sorts and outputs the index.  It can be compiled
+with certain optional flags, |DEBUG| and |STAT|, the latter being used
+to keep track of how much of \.{WEAVE}'s resources were actually used.
+
+@u
+@<Include files@>@;
+@<Common code for \.{WEAVE} and \.{TANGLE}@>@;
+@<Typedef declarations@>@;
+@<Global variables@>@;
+
+main (ac, av)
+char **av;
+{
+  argc=ac; argv=av;
+  program=weave;
+  common_init();
+  @<Set initial values@>;
+  printf(banner); /* print a ``banner line'' */
+  @<Store all the reserved words@>;
+  phase_one(); /* read all the user's text and store the cross-references */
+  phase_two(); /* read all the text again and translate it to \TeX\ form */
+  phase_three(); /* output the cross-reference index */
+#ifdef STAT
+  @<Print statistics about memory usage@>;
+#endif STAT
+  wrap_up();
+}
+
+@ The following parameters were sufficient in the original \.{WEAVE} to
+handle \TeX, so they should be sufficient for most applications of \.{CWEAVE}.
+
+@d max_bytes = 90000 /* the number of bytes in identifiers,
+  index entries, and module names */
+@d max_names = 4000 /* number of identifiers, strings, module names;
+  must be less than 10240 */
+@d max_modules = 2000 /* greater than the total number of modules */
+@d hash_size = 353 /* should be prime */
+@d buf_size = 100 /* maximum length of input line, plus one */
+@d longest_name = 400 /* module names and strings shouldn't be longer than this */
+@d long_buf_size = 500 /* |buf_size+longest_name| */
+@d line_length = 80 /* lines of \TeX\ output have at most this many characters;
+  should be less than 256 */
+@d max_refs = 20000 /* number of cross-references; must be less than 65536 */
+@d max_toks = 20000 /* number of symbols in \cee\ texts being parsed;
+  must be less than 65536 */
+@d max_texts = 2000 /* number of phrases in \cee\ texts being parsed;
+  must be less than 10240 */
+@d max_scraps = 1000 /* number of tokens in \cee\ texts being parsed */
+@d stack_size = 400 /* number of simultaneous output levels */
+
+@i common.h
+
+@ Should include wlang.web but can't because AWK runs out of files.
+
+@* Data structures exclusive to {\tt WEAVE}.
+As explained in \.{common.web}, the field of a |name_info| structure
+that contains the |rlink| of a module name is used for a completely
+different purpose in the case of identifiers.  If is then called the
+|ilk| of the identifier, and it is used to
+distinguish between various types of identifiers, as follows:
+
+@ Several types of identifiers are distinguished by their |ilk|:
+
+\yskip\hang |normal| identifiers are part of the \PASCAL\ program and
+will appear in italic type.
+\yskip\hang |roman| identifiers are index entries that appear after
+\.{@@\^} in the \.{WEB} file.
+
+\yskip\hang |wildcard| identifiers are index entries that appear after
+\.{@@:} in the \.{WEB} file.
+
+\yskip\hang |typewriter| identifiers are index entries that appear after
+\.{@@.} in the \.{WEB} file.
+
+\yskip\hang |array_like|, |begin_like|, \dots, |var_like|
+identifiers are \PASCAL\ reserved words whose |ilk| explains how they are
+to be treated when \PASCAL\ code is being formatted.
+
+\yskip\hang Finally, if |c| is an ASCII code, an |ilk| equal to
+|char_like+c| denotes a reserved word that will be converted to character
+|c|.
+
+@d normal = 0 /*ordinary identifiers have |normal| ilk */
+@d roman = 1 /*normal index entries have |roman| ilk */
+@d wildcard = 2 /*user-formatted index entries have |wildcard| ilk */
+@d typewriter = 3 /*`typewriter type' entries have |typewriter| ilk */
+@d reserved(a) = (a->ilk>typewriter) /* tells if a name is a reserved word */
+/* begin with 64 */
+
+/* ilks are generated by spider into file grammar.web */
+
+@ We keep track of the current module number in |module_count|, which
+is the total number of modules that have started.  Modules which have
+been altered by a change file entry have their |changed_module| flag
+turned on during the first phase.
+
+@<Global...@>=
+boolean change_exists; /* has any module changed? */
+
+@ The other large memory area in \.{CWEAVE} keeps the cross-reference data.
+All uses of the name |p| are recorded in a linked list beginning at
+|p->xref|, which points into the |xmem| array. The elements of |xmem|
+are structures consisting of an integer, |num|, and a pointer |xlink|
+to another element of |xmem|.  If |x=p->xref| is a pointer into |xmem|,
+the value of |x->num| is either a module number where |p| is used,
+or it is |def_flag| plus a module number where |p| is defined,
+or it is |file_flag| plus a module number where the file |p| is defined;
+and |x->xlink| points to the next such cross-reference for |p|,
+if any. This list of cross-references is in decreasing order by
+module number. The next unused slot in |xmem| is |xref_ptr|.
+
+The global variable |xref_switch| is set either to |def_flag|, or to zero, 
+depending on whether the next cross-reference to an identifier is to be
+underlined or not in the index. This switch is set to |def_flag| when
+\.{@@!} or \.{@@d} or \.{@@f} is scanned, and it is cleared to zero when
+the next identifier or index entry cross-reference has been made. 
+Similarly,
+the global variable |mod_xref_switch| is either |def_flag|, 
+|file_flag|, or zero, depending
+on whether a module name is being defined, defined as a file, or used.
+
+@<Type...@>=
+typedef struct xref_info {
+  sixteen_bits num; /* module number plus zero,|def_flag|, or |file_flag| */
+  struct xref_info *xlink; /* pointer to the previous cross-reference */
+} xref_info;
+typedef xref_info *xref_pointer;
+
+@ @<Global...@>=
+xref_info xmem[max_refs]; /* contains cross-reference information */
+xref_pointer xmem_end = xmem+max_refs-1;
+xref_pointer xref_ptr; /* the largest occupied position in |xmem| */
+sixteen_bits xref_switch,mod_xref_switch; /* either zero or |def_flag| */
+
+@ @d def_flag = 10240 /* must be strictly larger than |max_modules| */
+@d file_flag = 2*def_flag
+@d xref = equiv_or_xref
+
+@<Set init...@>=
+name_dir->xref=(ASCII *)xmem;
+xref_ptr=xmem; 
+xref_switch=0; 
+mod_xref_switch=0;
+xmem->num=0; /* cross-references to undefined modules */
+
+@ A new cross-reference for an identifier is formed by calling |new_xref|,
+which discards duplicate entries and ignores non-underlined references
+to one-letter identifiers or \cee's reserved words.
+
+If the user has sent the |no_xref| flag (the \.{-x} option of the command line),
+it is unnecessary to keep track of cross-references for identifers.
+If one were careful, one could probably make more changes around module
+100 to avoid a lot of identifier looking up.
+
+@d append_xref(c) = if (xref_ptr==xmem_end) stat_overflow("cross-reference");
+  else (++xref_ptr)->num=c;
+
+@u new_xref(p)
+name_pointer p;
+{
+  xref_pointer q; /* pointer to previous cross-reference */
+  sixteen_bits m, n; /* new and previous cross-reference value */
+  if (no_xref) return;
+  if ((reserved(p) || length(p)==1) && xref_switch==0) return;
+  m=module_count+xref_switch; xref_switch=0; q=(xref_pointer)p->xref;
+  if (q != xmem) {
+    n=q->num;
+    if (n==m || n==m+def_flag) return;
+    else if (m==n+def_flag) {
+ q->num=m; return;
+    }
+  }
+  append_xref(m); xref_ptr->xlink=q; p->xref=(ASCII *)xref_ptr;
+}
+
+@ The cross-reference lists for module names are slightly different. Suppose
+that a module name is defined in modules $m_1$, \dots, $m_k$ and used in
+modules $n_1$, \dots, $n_l$. Then its list will contain $m_1+|def_flag|{}$,
+$m_k+|def_flag|{}$, \dots, $m_2+|def_flag|{}$, $n_l$, \dots, $n_1$, in
+this order.
+If the module is a file module (\.{@@(}), read |file_flag| for
+|def_flag|.
+Since no module should ever have both |file_flag| and |def_flag|, we
+check that.
+  After Phase II, however, the order will be
+$m_1+|def_flag|{}$, \dots, $m_k+|def_flag|{}$, $n_1$, \dots, $n_l$.
+
+@u new_mod_xref(p)
+name_pointer p;
+{
+  xref_pointer q,r; /* pointers to previous cross-references */
+  q=(xref_pointer)p->xref; r=xmem;
+  if (q>xmem) {
+    if (mod_xref_switch==0) while (q->num>=def_flag) {
+      r=q; q=q->xlink;
+    }
+    else if (q->num>=def_flag) {
+      @<Make sure |mod_xref_switch| is consistent with |q->num|@>
+      r=q; q=q->xlink;
+    }
+  }
+  append_xref(module_count+mod_xref_switch);
+  xref_ptr->xlink=q; mod_xref_switch=0;
+  if (r==xmem) p->xref=(ASCII *)xref_ptr;
+  else r->xlink=xref_ptr;
+}
+
+@ Consistency check
+@<Make sure |mod_xref_switch| is consistent with |q->num|@>=
+{
+	if ((mod_xref_switch==def_flag && q->num >= file_flag) ||
+		(mod_xref_switch==file_flag && q->num < file_flag)) {
+      printf("\n! You can't use <"); print_id(p); 
+	printf("> both as a file and as a named module"); mark_harmless;
+@.You can't use <section name> both as a file...@>
+
+	}
+}
+
+
+@ A third large area of memory is used for sixteen-bit `tokens', which appear
+in short lists similar to the strings of characters in |byte_mem|. Token lists
+are used to contain the result of \cee\ code translated into \TeX\ form;
+further details about them will be explained later. A |text_pointer| variable
+is an index into |tok_start|.
+
+@<Typed...@>=
+typedef sixteen_bits token;
+typedef token *token_pointer;
+typedef token_pointer *text_pointer;
+
+@ The first position of |tok_mem|
+that is unoccupied by replacement text is called |tok_ptr|, and the first
+unused location of |tok_start| is called |text_ptr|.
+Thus, we usually have |*text_ptr=tok_ptr|.
+
+@<Global...@>=
+token tok_mem[max_toks]; /* tokens */
+token_pointer tok_mem_end = tok_mem+max_toks-1; /* end of |tok_mem| */
+token_pointer tok_start[max_texts]; /* directory into |tok_mem| */
+token_pointer tok_ptr; /* first unused position in |tok_mem| */
+text_pointer text_ptr; /* first unused position in |tok_start| */
+text_pointer tok_start_end = tok_start+max_texts-1; /* end of |tok_start| */
+#ifdef STAT
+token_pointer max_tok_ptr; /* largest value of |tok_ptr| */
+text_pointer max_text_ptr; /* largest value of |text_ptr| */
+#endif STAT
+
+@ @<Set init...@>=
+tok_ptr=tok_mem+1; text_ptr=tok_start+1; tok_start[0]=tok_mem+1;
+tok_start[1]=tok_mem+1; /* |tok_start| is the empty token list,
+			and |*textptr==tok_mem+1==tok_ptr| */
+#ifdef STAT
+max_tok_ptr=tok_mem+1; max_text_ptr=tok_start+1;
+#endif STAT
+
+@ @u
+names_match(p,first,l,t)
+name_pointer p; /* points to the proposed match */
+ASCII *first; /* position of first character of string */
+int l; /* length of identifier */
+eight_bits t; /* desired ilk */
+{
+  if (length(p)!=l) return 0;
+  if (p->ilk!=t && !(t==normal && reserved(p))) return 0;
+  return !strncmp(first,p->byte_start,l);
+}
+
+init_p(p,t)
+name_pointer p;
+eight_bits t;
+{
+  p->ilk=t; p->xref=(ASCII*)xmem;
+}
+
+init_node(p)
+name_pointer p;
+{
+  p->xref=(ASCII*)xmem;
+}
+
+@ We have to get Ada's
+reserved words into the hash table, and the simplest way to do this is
+to insert them every time \.{CWEAVE} is run.  Since there are relatively
+few reserved words, we use an ad hoc function to simplify the code.
+@^reserved words@>
+There's not enough room to include \.{reserved.web}, since AWK can't open 
+enough files.
+We make do with \.{scraps.web}.
+
+
+
+@* Lexical scanning.
+Let us now consider the subroutines that read the \.{WEB} source file
+and break it into meaningful units. There are four such procedures:
+One simply skips to the next `\.{@@\ }' or `\.{@@*}' that begins a
+module; another passes over the \TeX\ text at the beginning of a
+module; the third passes over the \TeX\ text in a \cee\ comment;
+and the last, which is the most interesting, gets the next token of
+a \cee\ text.  They all use the pointers |limit| and |loc| into
+the line of input currently being studied.
+
+@ Control codes in \.{WEB}, which begin with `\.{@@}', are converted
+into a numeric code designed to simplify \.{CWEAVE}'s logic; for example,
+larger numbers are given to the control codes that denote more significant
+milestones, and the code of |new_module| should be the largest of
+all. Some of these numeric control codes take the place of ASCII
+control codes that will not otherwise appear in the output of the
+scanning routines.
+@^ASCII code@>
+
+@d ignore = 0 /* control code of no interest to \.{CWEAVE} */
+@d verbatim = @'2 /* extended ASCII alpha will not appear */
+		 /* extended ASCII beta will not appear */
+@d begin_comment = @'10 /* ASCII tab mark will not appear */
+@d octal = @'14 /* ASCII carriage return will not appear */
+@d hex = @'15 /* ASCII form feed will not appear */
+@d switch_math_flag = @'175 /* this code will be intercepted without confusion */
+@d underline = @'176 /* this code will be intercepted without confusion */
+@d param = @'177 /* ASCII delete will not appear */
+/* identifier =200 or octal @'310 */
+@#/* following three must be conseccutive for indexing to work */
+@d xref_roman = (identifier+roman) /* control code for `\.{@@\^}' */
+@d xref_wildcard = (identifier+wildcard) /* control code for `\.{@@:}' */
+@d xref_typewriter = (identifier+typewriter) /* control code for `\.{@@.}' */
+@d TeX_string = @'356 /* control code for `\.{@@t}' */
+@d ascii_constant = @'357 /* control code for `\.{@@`}' */
+@d join = @'360 /* control code for `\.{@@\&}' */
+@d thin_space = @'361 /* control code for `\.{@@,}' */
+@d math_break = @'362 /* control code for `\.{@@\char'174}' */
+@d line_force = @'363 /* control code for `\.{@@/}' */
+@d line_break = @'364 /* control code for `\.{@@-}' */
+@d big_line_break = @'365 /* control code for `\.{@@\#}' */
+@d no_line_break = @'366 /* control code for `\.{@@+}' */
+@d pseudo_semi = @'367 /* control code for `\.{@@;}' */
+@d vertical_bar = @'370 /* The `\v' used to mark Ada text */
+@d trace = @'371 /* control code for `\.{@@0}', `\.{@@1}' and `\.{@@2}' */
+@d format = @'373 /* control code for `\.{@@f}' */
+@d definition = @'374 /* control code for `\.{@@d}' */
+@d begin_unnamed = @'375 /* control code for `\.{@@u}' */
+@d module_name = @'376 /* control code for `\.{@@<}' */
+@d new_module = @'377 /* control code for `\.{@@\ }' and `\.{@@*}' */
+
+@ Control codes are converted from ASCII to \.{CWEAVE}'s internal
+representation by means of the table |ccode|.
+
+@<Global...@>=
+eight_bits ccode[128]; /* meaning of a char following \.{@@} */
+
+@ @<Set ini...@>=
+{int c; for (c=0; c<=127; c++) ccode[c]=0;}
+ccode[' ']=ccode[tab_mark]=ccode['*']=new_module;
+ccode['-']=line_break;
+ccode['#']=big_line_break;
+ccode['=']=verbatim; 
+ccode['d']=ccode['D']=definition; 
+ccode['f']=ccode['F']=format;
+ccode['c']=ccode['C']=begin_unnamed; 
+ccode['u']=ccode['U']=begin_unnamed; 
+ccode['t']=ccode['T']=TeX_string;
+ccode['&']=join; 
+ccode['<']=ccode['(']=module_name;
+ccode['!']=underline; ccode['^']=xref_roman;
+ccode['$']=switch_math_flag;
+ccode[':']=xref_wildcard; 
+ccode['.']=xref_typewriter; 
+ccode[',']=thin_space;
+ccode['|']=math_break; 
+ccode['/']=line_force;
+ccode['+']=no_line_break; 
+ccode[';']=pseudo_semi;
+ccode['`']=ascii_constant;
+ccode['\'']=octal;
+ccode['"']=hex;
+@t\4@>@<Special control codes allowed only when debugging@>@;
+@#
+/*Now adjust for |at_sign|... if it is @@, we have no-op followed by quoting */
+/* ... but if it is other, say \#, then \#@@ replaces @@\#, and \#\# 
+	quotes itself*/
+ccode['@@']=ccode[at_sign];
+ccode[at_sign]=at_sign;
+
+@ If \.{CWEAVE} is compiled with debugging commands, one can write
+\.{@@2}, \.{@@1}, and \.{@@0} to turn tracing fully on, partly on,
+and off, respectively.
+
+@<Special control codes...@>=
+#ifdef DEBUG
+ccode['0']=ccode['1']=ccode['2']=trace;
+#endif DEBUG
+
+@ The |skip_limbo| routine is used on the first pass to skip through
+portions of the input that are not in any modules, i.e., that precede
+the first module. After this procedure has been called, the value of
+|input_has_ended| will tell whether or not a module has actually been found.
+
+@u skip_limbo() {
+  while(1) {
+    if (loc>limit && get_line()==0) return;
+    *(limit+1)=at_sign;
+    while (*loc!=at_sign) loc++; /* look for |at_sign|, then skip two chars */
+    if (loc++ <=limit) if (ccode[*loc++]==new_module) return;
+  }
+}
+
+@ The |skip_TeX| routine is used on the first pass to skip through
+the \TeX\ code at the beginning of a module. It returns the next
+control code or `\v' found in the input. A |new_module| is
+assumed to exist at the very end of the file.
+
+@u unsigned skip_TeX() /* skip past pure \TeX\ code */
+{
+  while (1) {
+    if (loc>limit && get_line()==0) return(new_module);
+    *(limit+1)=at_sign;
+    while (*loc!=at_sign && *loc!=vertical_char) loc++;
+    if (*loc++ ==vertical_char) return(vertical_bar);
+    if (loc<=limit) return(ccode[*(loc++)]);
+  }
+}
+
+@* Inputting the next token.
+As stated above, \.{WEAVE}'s most interesting lexical scanning routine is the
+|get_next| function that inputs the next token of \cee\ input. However,
+|get_next| is not especially complicated.
+
+The result of |get_next| is either an ASCII code for some special character,
+or it is a special code representing a pair of characters (e.g., `\.{!=}'),
+or it is the numeric value computed by the |ccode|
+table, or it is one of the following special codes:
+
+\yskip\hang |identifier|: In this case the global variables |id_first| and
+|id_loc| will have been set to the beginning and ending-plus-one locations
+in the buffer, as required by the |id_lookup| routine.
+
+\yskip\hang |string|: The string will have been copied into the array
+|mod_text|; |id_first| and |id_loc| are set as above (now they are
+pointers into |mod_text|).
+
+\yskip\hang |constant|: The constant is copied into |mod_text|, with
+slight modifications; |id_first| and |id_loc| are set.
+
+\yskip\noindent Furthermore, some of the control codes cause
+|get_next| to take additional actions:
+
+\yskip\hang |xref_roman|, |xref_wildcard|, |xref_typewriter|, |TeX_string|,
+|verbatim|: The values of |id_first| and |id_loc| will have been set to
+the beginning and ending-plus-one locations in the buffer.
+
+\yskip\hang |module_name|: In this case the global variable |cur_module| will
+point to the |byte_start| entry for the module name that has just been scanned.
+
+\yskip\noindent If |get_next| sees `\.{@@!}'
+it sets |xref_switch| to |def_flag| and goes on to the next token.
+
+\yskip\noindent If |get_next| sees `\.{@@\$}'
+it sets |math_flag| to |!math_flag| and goes on to the next token.
+
+
+
+@<Global...@>=
+name_pointer cur_module; /* name of module just scanned */
+int math_flag;
+
+@ @<Include...@>=
+#include "ctype.h"
+
+@ As one might expect, |get_next| consists mostly of a big switch
+that branches to the various special cases that can arise.
+
+Get next takes one argument that determines whether |vertical_char| is a
+character or gets translated to a |vertical_bar|.
+(Normally, |vertical_char=='|'|.)
+If it does get translated, the following rules apply:
+
+\yskip\hang|'|'| as part of a string or as a noninitial character in a
+multicharacter token is not a |vertical_bar|.
+
+\yskip\hang An initial |"||"| is treated like a single |'|'|, and
+taken to be either a token itself or the initial |'|'| in a
+multicharacter token.
+
+@d vertical_char = @`|'
+@u eight_bits get_next(see_vertical) /* produces the next input token
+*/
+	char see_vertical;
+{
+  eight_bits c; /* the current character */
+  while (1) {
+    if (loc>limit) {
+        if (get_line()==0) return(new_module);
+        else { return (@`\n'); }
+        }
+    c=*(loc++);
+    @<See a comment starting at |loc-1| and return |begin_comment|@>@;
+    if (see_vertical && c==vertical_char) { 
+	if (*loc==vertical_char && loc < limit) {
+		loc++;
+	} else {
+		return vertical_bar;
+	}
+    }
+    if (isdigit(c)) @<Get a constant@>@; /*spider*/
+    else if (isalpha(c) || c=='_') @<Get an identifier@>@;/*spider*/
+    else if (c=='\'' || c=='"') @<Get a string@>@;/*spider*/
+    else if (c==at_sign) @<Get control code and possible module name@>@;
+    else if (c==' ' || c==tab_mark) continue; /* ignore spaces and tabs */
+    mistake: @<Compress two-symbol operator@>@;
+    return(c);
+  }
+}
+
+@ @<Set |next_control| to the first non-newline token@>=
+while ((next_control=get_next(0))==@`\n');
+
+@ @<Get an identifier@>= {/*spider*/
+  id_first=--loc;
+  while (isalpha(*++loc) || isdigit(*loc) || *loc=='_');
+  id_loc=loc; return(identifier);
+}
+
+@ Notice that in this section and the next, |id_first| and |id_loc|
+are pointers into the array |mod_text|, not into |buffer|.
+
+@<Get a constant@>= {
+  id_first=id_loc=mod_text+1;
+
+  if (*(loc-1)=='.' && !isdigit(*loc)) goto mistake; /* not a constant */
+  *id_loc++=*(loc-1);
+    while (isdigit(*loc)) *id_loc++=*loc++;
+    if (*loc=='.') {
+	*id_loc++=*loc++;
+	while (isdigit(*loc)) *id_loc++=*loc++;
+	}
+#ifdef C_FLOATING_POINT
+/* no floating point --- it depends too much on C */
+    if (*loc=='e' || *loc=='E') { /* float constant */
+      *id_loc++='_'; loc++;
+      if (*loc=='+' || *loc=='-') *id_loc++=*loc++;
+      while (isdigit(*loc)) *id_loc++=*loc++;
+    }
+#endif C_FLOATING_POINT
+  return(constant);
+}
+
+
+
+@ Here we do octals, which I should say more about later...
+@<Get an octal constant@>= {
+  id_first=id_loc=mod_text+1;
+  *id_loc++='~'; /* marks octal constant */
+  while ('0'<=*loc && *loc<'8') *id_loc++=*loc++;
+  return(constant);
+}
+@ And hexes are even easier...
+@<Get a hex constant@>= {
+  id_first=id_loc=mod_text+1;
+  *id_loc++='^'; /* marks hex constant */
+  while (isxdigit(*loc)) {
+	*id_loc++=(islower(*loc)?toupper(*loc):*loc);
+	loc++;
+	}
+  return(constant);
+}
+
+@ \cee\ strings and character constants, delimited by double and single
+quotes, respectively, can contain newlines or instances of their own
+delimiters if they are protected by a backslash.  We follow this
+convention, but do not allow the string to be longer than |longest_name|.
+
+@<Get a string@>= {/*spider*/
+  ASCII delim = c; /* what started the string */
+  id_first = mod_text+1;
+  id_loc = mod_text;
+  if (delim=='`' && *(loc-2)==at_sign) {
+	/* make string begin with |"@@`"| */
+	*++id_loc=at_sign; 
+	*++id_loc=at_sign;
+	}
+	/* this is hack for ascii constant */
+@#
+/* if it's not a single-character literal, it's a tick mark or an |at_sign| */
+  if ((delim=='\'' || delim == '`') && 
+		(loc+1>=limit || 
+			(*loc != '\\' && *loc!=at_sign && loc[1]!='\'')	|| 
+			(*loc=='\\' && (loc+2>=limit||loc[2]!='\'')) ||
+			(*loc==at_sign && 
+			    (loc+2>=limit||loc[1]!=at_sign||loc[2]!='\''))
+		)
+      ) goto mistake;
+  *++id_loc=delim;
+  if (delim=='`') delim='\''; /* for |ascii_constant|s */
+  while (1) {
+    if (loc>=limit) {
+      if(*(limit-1)!='\\') {
+        err_print("! String didn't end"); loc=limit; break;
+@.String didn't end@>
+      }
+      if(get_line()==0) {
+        err_print("! Input ended in middle of string"); loc=buffer; break;
+@.Input ended in middle of string@>
+      }
+    }
+    if ((c=*loc++)==delim) {
+      if (++id_loc<=mod_text_end) *id_loc=c;
+      break;
+    }
+    if (c=='\\') if (loc>=limit) continue;
+      else if (++id_loc<=mod_text_end) {
+        *id_loc = '\\'; c=*loc++;
+      }
+    if (++id_loc<=mod_text_end) *id_loc=c;
+  }
+  if (id_loc>=mod_text_end) {
+    printf("\n! String too long: ");
+@.String too long@>
+    ASCII_write(mod_text+1,25);
+    printf("..."); mark_error;
+  }
+  id_loc++;
+  return(string);
+}
+
+@ After an \.{@@} sign has been scanned, the next character tells us
+whether there is more work to do.
+
+@<Get control code and possible module name@>= {
+  c=*loc++;
+  switch(ccode[c]) {
+    case underline: xref_switch=def_flag; continue;
+    case switch_math_flag: math_flag=!math_flag; continue;
+#ifdef DEBUG
+    case trace: tracing=c-'0'; continue;
+#endif DEBUG
+    case xref_roman: case xref_wildcard: case xref_typewriter:
+    case TeX_string: 
+	@<Scan to the next \.{@@>}@>@;
+    case module_name: 
+	@<Scan the module name and make |cur_module| point to it@>@;
+    case verbatim: @<Scan a verbatim string@>@;
+    case ascii_constant: /* fake into looking like quoted char */
+		@<Get a string@>;
+    case octal: @<Get an octal constant@>;
+    case hex: @<Get a hex constant@>;
+    default: return(ccode[c]);
+  }
+}
+
+@ The occurrence of a module name sets |xref_switch| to zero,
+because the module name might (for example) follow \&{int}.
+
+@<Scan the module name...@>= {
+  ASCII *k; /* pointer into |mod_text| */
+  cur_module_char=c; /* remember |'<'| or |'('| */
+  @<Put module name into |mod_text|@>;
+  if (k-mod_text>3 && strncmp(k-2,"...",3)==0) cur_module=prefix_lookup(mod_text+1,k-3);
+  else cur_module=mod_lookup(mod_text+1,k);
+  xref_switch=0; return(module_name);
+}
+
+@ @<Global...@>=ASCII cur_module_char;
+
+@ Module names are placed into the |mod_text| array with consecutive spaces,
+tabs, and carriage-returns replaced by single spaces. There will be no
+spaces at the beginning or the end. (We set |mod_text[0]=' '| to facilitate
+this, since the |mod_lookup| routine uses |mod_text[1]| as the first
+character of the name.)
+
+@<Set init...@>=mod_text[0]=' ';
+
+@ @<Put module name...@>=
+k=mod_text;
+while (1) {
+  if (loc>limit && get_line()==0) {
+    err_print("! Input ended in section name");
+@.Input ended in section name@>
+    loc=buffer+1; break;
+  }
+  c=*loc;
+  @<If end of name, |break|@>;
+  loc++; if (k<mod_text_end) k++;
+  if (c==' ' || c==tab_mark) {
+    c=' '; if (*(k-1)==' ') k--;
+  }
+*k=c;
+}
+if (k>=mod_text_end) {
+  printf("\n! Section name too long: ");
+@.Section name too long@>
+  ASCII_write(mod_text+1,25);
+  printf("..."); mark_harmless;
+}
+if (*k==' ' && k>mod_text) k--;
+
+@ @<If end of name,...@>=
+if (c==at_sign) {
+  c=*(loc+1);
+  if (c=='>') {
+    loc+=2; break;
+  }
+  if (ccode[c]==new_module) {
+    err_print("! Section name didn't end"); break;
+@.Section name didn't end@>
+  }
+  *(++k)=at_sign; loc++; /* now |c==*loc| again */
+}
+
+@ @<Scan to the next...@>= {
+  c=ccode[*(loc-1)]; id_first=loc; *(limit+1)=at_sign;
+  while (*loc!=at_sign) loc++;
+  id_loc=loc;
+  if (loc++>limit) {
+    err_print("! Control text didn't end"); loc=limit; return(c);
+@.Control text didn't end@>
+  }
+  if (*loc++!='>') err_print("! Control codes are forbidden in control text");
+@.Control codes are forbidden...@>
+  return(c);
+}
+
+@ At the present point in the program we
+have |*(loc-1)=verbatim|; we set |id_first| to the beginning
+of the string itself, and |id_loc| to its ending-plus-one location in the
+buffer.  We also set |loc| to the position just after the ending delimiter.
+
+@<Scan a verbatim string@>= {
+  id_first=loc++; *(limit+1)=at_sign; *(limit+2)='>';
+  while (*loc!=at_sign || *(loc+1)!='>') loc++;
+  if (loc>=limit) err_print("! Verbatim string didn't end");
+@.Verbatim string didn't end@>
+  id_loc=loc; loc+=2;
+  return (verbatim);
+}
+
+@* Phase one processing.
+We now have accumulated enough subroutines to make it possible to carry out
+\.{WEAVE}'s first pass over the source file. If everything works right,
+both phase one and phase two of \.{WEAVE} will assign the same numbers to
+modules, and these numbers will agree with what \.{TANGLE} does.
+
+The global variable |next_control| often contains the most recent output of
+|get_next|; in interesting cases, this will be the control code that
+ended a module or part of a module.
+
+@<Global...@>=
+eight_bits next_control; /* control code waiting to be acting upon */
+
+@ The overall processing strategy in phase one has the following
+straightforward outline.
+
+@u phase_one() {
+phase=1; reset_input(); module_count=0;
+skip_limbo(); change_exists=0;
+while (!input_has_ended)
+  @<Store cross-reference data for the current module@>;
+changed_module[module_count]=change_exists;
+  /* the index changes if anything does */
+phase=2; /* prepare for second phase */
+@<Print error messages about unused or undefined module names@>;
+}
+
+@ @<Store cross-reference data...@>=
+{
+  if (++module_count==max_modules) stat_overflow("section number");
+  changed_module[module_count]=0; /* it will become 1 if any line changes */
+  if (*(loc-1)=='*') {
+    printf("*%d",module_count);
+    update_terminal; /* print a progress report */
+  }
+  @<Store cross-references in the \TeX\ part of a module@>;
+  @<Store cross-references in the definition part of a module@>;
+  @<Store cross-references in the \cee\ part of a module@>;
+  if (changed_module[module_count]) change_exists=1;
+}
+
+@ The |C_xref| subroutine stores references to identifiers in
+\cee\ text material beginning with the current value of |next_control|
+and continuing until |next_control| is `\.\{' or `\v', or until the next
+``milestone'' is passed (i.e., |next_control>=format|). If
+|next_control>=format| when |C_xref| is called, nothing will happen;
+but if |next_control="|"| upon entry, the procedure assumes that this is
+the `\v' preceding \cee\ text that is to be processed.
+
+The program uses the fact that our internal code numbers satisfy
+the relations |xref_roman=identifier+roman| and |xref_wildcard=identifier
++wildcard| and |xref_typewriter=identifier+typewriter| and |normal=0|.
+
+@u C_xref(see_v) /* makes cross-references for \cee\ identifiers */
+	char see_v;
+{
+  name_pointer p; /* a referenced name */
+  while (next_control<format) {
+    if (next_control>=identifier && next_control<=xref_typewriter) {
+      p=id_lookup(id_first, id_loc,next_control-identifier); new_xref(p);
+    }
+    next_control=get_next(see_v);
+    if (next_control==vertical_bar || next_control==begin_comment) return;
+  }
+}
+
+@ The |outer_xref| subroutine is like |C_xref| but it begins
+with |next_control!=vertical_bar| and ends with |next_control>=format|. Thus, it
+handles \cee\ text with embedded comments.
+
+@u outer_xref() /* extension of |C_xref| */
+{
+  int bal; /* brace level in comment */
+  while (next_control<format)
+    if (next_control!=begin_comment) C_xref(0);
+    else {
+      bal=copy_comment(1); next_control=vertical_bar;
+      while (bal>0) {
+ C_xref(1);
+ if (next_control==vertical_bar) bal=copy_comment(bal);
+ else bal=0; /* an error message will occur in phase two */
+      }
+    }
+}
+
+@ In the \TeX\ part of a module, cross-reference entries are made only for
+the identifiers in \cee\ texts enclosed in \pb, or for control texts
+enclosed in \.{@@\^}$\,\ldots\,$\.{@@>} or \.{@@.}$\,\ldots\,$\.{@@>}
+or \.{@@:}$\,\ldots\,$\.{@@>}.
+
+@<Store cross-references in the \T...@>=
+while (1) {
+  switch (next_control=skip_TeX()) {
+    case underline: xref_switch=def_flag; continue;
+#ifdef DEBUG
+    case trace: tracing=next_control-'0'; continue;
+#endif DEBUG
+    case vertical_bar: C_xref(1); break;
+    case xref_roman: case xref_wildcard: 
+    case xref_typewriter: case module_name:
+      loc-=2; next_control=get_next(1); /* scan to \.{@@>} */
+      if (next_control!=module_name) {
+/* |printf ("\nweave debugging: new xref: ");| */
+/* |{char *p; for (p=id_first;p<id_loc;p++) putchar(*p);}| */
+/* |putchar('\n');|
+ */
+        new_xref(id_lookup(id_first, id_loc,next_control-identifier));
+	}
+      break;
+  }
+  if (next_control>=format) break;
+}
+
+@ During the definition and \cee\ parts of a module, cross-references
+are made for all identifiers except reserved words; however, the
+identifiers in a format definition are referenced even if they are
+reserved. The \TeX\ code in comments is, of course, ignored, except for
+\cee\ portions enclosed in \pb; the text of a module name is skipped
+entirely, even if it contains \pb\ constructions.
+
+The variables |lhs| and |rhs| point to the respective identifiers involved
+in a format definition.
+
+@<Global...@>=
+name_pointer lhs, rhs; /* pointers to |byte_start| for format identifiers */
+
+@ When we get to the following code we have |next_control>=format|.
+
+@<Store cross-references in the d...@>=
+while (next_control<=definition) { /* |format| or |definition| */
+  xref_switch=def_flag; /* implied \.{@@!} */
+  if (next_control==definition) next_control=get_next(1);
+  else @<Process a format definition@>;
+  outer_xref();
+}
+
+@ Error messages for improper format definitions will be issued in phase
+two. Our job in phase one is to define the |ilk| of a properly formatted
+identifier, and to fool the |new_xref| routine into thinking that the
+identifier on the right-hand side of the format definition is not a
+reserved word.
+
+@<Process a form...@>= {
+  next_control=get_next(1);
+  if (next_control==identifier) {
+    lhs=id_lookup(id_first, id_loc,normal); lhs->ilk=normal; new_xref(lhs);
+    next_control=get_next(1);
+    if (next_control==identifier) {
+      rhs=id_lookup(id_first, id_loc,normal);
+      lhs->ilk=rhs->ilk; rhs->ilk=normal; new_xref(rhs);
+      rhs->ilk=lhs->ilk; next_control=get_next(1);
+    }
+  }
+}
+
+@ Finally, when the \TeX\ and definition parts have been treated, we have
+|next_control>=begin_unnamed|.
+
+@<Store cross-references in the \cee...@>=
+if (next_control<=module_name) {  /* |begin_unnamed| or |module_name| */
+  if (next_control==begin_unnamed) mod_xref_switch=0;
+  else mod_xref_switch=(cur_module_char=='<' ? def_flag: file_flag);
+  do {
+    if (next_control==module_name && cur_module!=NULL) new_mod_xref(cur_module);
+    next_control=get_next(1); outer_xref();
+  } while ( next_control<=module_name);
+}
+
+@ After phase one has looked at everything, we want to check that each
+module name was both defined and used.  The variable |cur_xref| will point
+to cross-references for the current module name of interest.
+
+@<Global...@>=
+xref_pointer cur_xref; /* temporary cross-reference pointer */
+
+@ The following recursive procedure
+walks through the tree of module names and prints out anomalies.
+@^recursion@>
+
+@u mod_check(p) name_pointer p; /* print anomalies in subtree |p| */
+{
+  int level; /* 0: use 1: definition 2: file definition */
+  if (p) {
+    mod_check(p->llink);
+    cur_xref=(xref_pointer)p->xref;
+    level=(cur_xref->num)/def_flag;
+    if (level==0) {
+      printf("\n! Never defined: <"); print_id(p); putchar('>'); mark_harmless;
+@.Never defined: <section name>@>
+    }
+    while (cur_xref->num >=def_flag) {
+	if ((cur_xref->num)/def_flag != level) {
+	      printf("\n! You can't use <"); print_id(p); 
+	      printf("> both as a file and as a named module"); mark_harmless;
+@.You can't use <section name> both as a file...@>
+	}
+	cur_xref=cur_xref->xlink;
+    }
+    if (cur_xref==xmem && level<2) {
+      printf("\n! Never used: <"); print_id(p); putchar('>'); mark_harmless;
+@.Never used: <section name>@>
+    }
+    else if (cur_xref!=xmem && level==2) {
+      printf("\n! You can't use file module ("); print_id(p);
+	putchar(')'); mark_harmless; 
+@.You can't use file module (file name)@>
+    }
+    mod_check(p->rlink);
+  }
+}
+
+@ @<Print error messages about un...@>=mod_check(root)
+
+@* Low-level output routines.
+The \TeX\ output is supposed to appear in lines at most |line_length|
+characters long, so we place it into an output buffer. During the output
+process, |out_line| will hold the current line number of the line about to
+be output.
+
+@<Global...@>=
+ASCII out_buf[line_length+1]; /* assembled characters */
+ASCII *out_ptr; /* just after last character in |out_buf| */
+ASCII *out_buf_end = out_buf+line_length; /* end of |out_buf| */
+int out_line; /* number of next line to be output */
+
+@ The |flush_buffer| routine empties the buffer up to a given breakpoint,
+and moves any remaining characters to the beginning of the next line.
+If the |per_cent| parameter is 1 a |'%'| is appended to the line
+that is being output; in this case the breakpoint |b| should be strictly
+less than |out_buf_end|. If the |per_cent| parameter is |0|,
+trailing blanks are suppressed.
+The characters emptied from the buffer form a new line of output.
+
+The same caveat that applies to |ASCII_write| applies to |c_line_write|.
+
+@d c_line_write(c) = fflush(tex_file),write(fileno(tex_file),out_buf+1,c)@;
+@d tex_putxchar(c) = putc(xchr[c],tex_file)@;
+@d tex_new_line = putc('\n',tex_file)@;
+@d tex_printf(c) = fprintf(tex_file,c)@;
+
+@u flush_buffer(b,per_cent)
+ASCII *b;
+boolean per_cent; /* outputs from |out_buf+1| to |b|,where |b<=out_ptr| */
+{
+  ASCII *j; j=b; /* pointer into |out_buffer| */
+  if (! per_cent) /* remove trailing blanks */
+    while (j>out_buf && *j==' ') j--;
+  c_line_write(j-out_buf);
+  if (per_cent) tex_putxchar('%');
+  tex_new_line; out_line++;
+  if (b<out_ptr) strncpy(out_buf+1,b+1,out_ptr-b);
+  out_ptr-=b-out_buf;
+}
+
+@ When we are copying \TeX\ source material, we retain line breaks
+that occur in the input, except that an empty line is not
+output when the \TeX\ source line was nonempty. For example, a line
+of the \TeX\ file that contains only an index cross-reference entry
+will not be copied. The |finish_line| routine is called just before
+|get_line| inputs a new line, and just after a line break token has
+been emitted during the output of translated \cee\ text.
+
+@u finish_line() /* do this at the end of a line */
+{
+  ASCII *k; /* pointer into |buffer| */
+  if (out_ptr>out_buf) flush_buffer(out_ptr,0);
+  else {
+    for (k=buffer; k<=limit; k++)
+      if (*k!=' ' && *k!=tab_mark) return;
+    flush_buffer(out_buf,0);
+  }
+}
+
+@ In particular, the |finish_line| procedure is called near the very
+beginning of phase two. We initialize the output variables in a slightly
+tricky way so that the first line of the output file will be a command
+to read in the macro file.
+
+@<Set init...@>=
+out_ptr=out_buf+1; out_line=1; 
+@<Set |out_ptr| and do a |tex_printf| to read the macros@> 
+
+@ When we wish to append one character |c| to the output buffer, we write
+`|out(c)|'; this will cause the buffer to be emptied if it was already
+full.  If we want to append more than one character at once, we say
+|out_str(s)|, where |s| is a string containing the characters,
+or |out_str_del(s,t)|, where |s| and |t| point to the same array of
+characters; characters from |s| to |t-1|, inclusive, are output.
+
+A line break will occur at a space or after a single-nonletter
+\TeX\ control sequence.
+
+@d out(c) = {if (out_ptr>=out_buf_end) break_out(); *(++out_ptr)=c;}
+
+@u out_str_del(s,t) /* output characters from |s| to |t-1| */
+ASCII *s, *t;
+{
+  while (s<t) out(*s++);
+}
+
+out_str(s) /* output characters from |s| to end of string */
+ASCII *s;
+{
+  while (*s) out(*s++);
+}
+
+@ The |break_out| routine is called just before the output buffer is about
+to overflow. To make this routine a little faster, we initialize position
+0 of the output buffer to `\.\\'; this character isn't really output.
+
+@<Set init...@>=
+out_buf[0]='\\';
+
+@ A long line is broken at a blank space or just before a backslash that isn't
+preceded by another backslash. In the latter case, a |'%'| is output at
+the break.
+
+@u break_out() /* finds a way to break the output line */
+{
+  ASCII *k=out_ptr; /* pointer into |out_buf| */
+  while (1) {
+    if (k==out_buf) @<Print warning message, break the line, |return|@>;
+    if (*k==' ') {
+      flush_buffer(k,0); return;
+    }
+    if (*(k--)=='\\' && *k!='\\') { /* we've decreased |k| */
+      flush_buffer(k,1); return;
+    }
+  }
+}
+
+@ We get to this module only in unusual cases that the entire output line
+consists of a string of backslashes followed by a string of nonblank
+non-backslashes. In such cases it is almost always safe to break the
+line by putting a |'%'| just before the last character.
+
+@<Print warning message...@>=
+{
+  printf("\n! Line had to be broken (output l. %d):\n",out_line);
+@.Line had to be broken@>
+  ASCII_write(out_buf+1, out_ptr-out_buf-1);
+  new_line; mark_harmless;
+  flush_buffer(out_ptr-1,1); return;
+}
+
+@ Here is a macro that outputs a module number in decimal notation.
+The number to be converted by |out_mod| is known to be less than
+|def_flag|, so it cannot have more than five decimal digits.  If
+the module is changed, we output `\.{\\*}' just after the number.
+
+@u out_mod(n) sixteen_bits n;
+{
+  ASCII s[6];
+  sprintf(s,"%d",n); out_str(s);
+  if(changed_module[n]) out_str ("\\*");
+}
+
+@ The |out_name| procedure is used to output an identifier or index
+entry, enclosing it in braces.
+
+@u out_name(p) name_pointer p; {
+  ASCII *k, *k_end=(p+1)->byte_start; /* pointers into |byte_mem| */
+  out('{');
+  for (k=p->byte_start; k<k_end; k++) {
+    if (*k=='$') {out('\\'); out('D'); out('O'); out(' ');}
+    else if (*k=='&') {out('\\'); out('a'); out('m'); out('p');}
+	else {
+  if (*k=='_' || *k=='%' || *k=='#' || *k=='^' || *k=='{' || *k=='}') 
+		out('\\');
+      out(*k);
+	}
+  }
+  out('}');
+}
+
+@* Routines that copy \TeX\ material.
+During phase two, we use the subroutines |copy_limbo|, |copy_TeX|, and
+|copy_comment| in place of the analogous |skip_limbo|, |skip_TeX|, and
+|skip_comment| that were used in phase one.
+
+The |copy_limbo| routine, for example, takes \TeX\ material that is not
+part of any module and transcribes it almost verbatim to the output file.
+No `\.{@@}' signs should occur in such material except in `\.{@@@@}'
+pairs; such pairs are replaced by singletons.
+
+@u copy_limbo()
+{
+  ASCII c;
+  while (1) {
+    if (loc>limit && (finish_line(), get_line()==0)) return;
+    *(limit+1)=at_sign;
+    while (*loc!=at_sign) out(*(loc++));
+    if (loc++<=limit) {
+      c=*loc++;
+      if (ccode[c]==new_module) break;
+      if (c!='z' && c!='Z') {
+        out(at_sign);
+        if (c!=at_sign) err_print("! Double @@ required outside of sections");
+@.Double \AT! required...@>
+      }
+    }
+  }
+}
+
+
+@ The |copy_TeX| routine processes the \TeX\ code at the beginning of a
+module; for example, the words you are now reading were copied in this
+way. It returns the next control code or `\v' found in the input.
+We don't copy spaces or tab marks into the beginning of a line. This
+makes the test for empty lines in |finish_line| work.
+
+@<Global...@>= eight_bits next_control; /* control code found */
+
+@ @u eight_bits copy_TeX()
+{
+  ASCII c; /* current character being copied */
+  while (1) {
+    if (loc>limit && (finish_line(), get_line()==0)) return(new_module);
+    *(limit+1)=at_sign;
+    while ((c=*(loc++))!=vertical_char && c!=at_sign) {
+      out(c);
+      if (out_ptr==out_buf+1 && (c==' ' || c==tab_mark)) out_ptr--;
+    }
+    if (c==vertical_char) return(vertical_bar);
+    if (loc<=limit) return(ccode[*(loc++)]);
+  }
+}
+
+@ The |copy_comment| function issues a warning if more braces are opened than
+closed, and in the case of a more serious error it supplies enough
+braces to keep \TeX\ from complaining about unbalanced braces.
+Instead of copying the \TeX\ material
+into the output buffer, this function copies it into the token memory.
+The abbreviation |app_tok(t)| is used to append token |t| to the current
+token list, and it also makes sure that it is possible to append at least
+one further token without overflow.
+
+Copies to end and then follows end of comment with a right brace.
+
+@d app_tok(c) = {if (tok_ptr+2>tok_mem_end) stat_overflow("token"); *(tok_ptr++)=c;}
+
+@u
+copy_comment(bal) /* copies \TeX\ code in comments */
+int bal; /* brace balance */
+{
+  ASCII c; /* current character being copied */
+  while (1) {
+    if (loc>limit) 
+	if (comments_end_with_newline) {
+	  loc++; if(bal==1) {if (phase==2) app_tok('}'); return(0);}
+	  else {
+	    err_print("! Braces don't balance in comment");
+@.Braces don't balance in comment@>
+	    @<Clear |bal| and |return|@>;
+	  }
+	} else {
+		if (get_line()==0) {
+		err_print("! Input ended in mid-comment");
+@.Input ended in mid-comment@>
+	        loc=buffer+1; @<Clear |bal| and |return|@>;
+		}
+	}
+
+    c=*(loc++);
+    if (c==vertical_char) return(bal);
+    @<Check for end of comment@>;
+    if (phase==2) app_tok(c);
+    @<Copy special things when |c==at_sign, '\\', '{', '}'|; |return| at end@>;
+  }
+}
+
+
+
+@ @<Copy special things when |c==at_sign...@>=
+if (c==at_sign) {
+  if (*(loc++)!=at_sign) {
+    err_print("! Illegal use of @@ in comment");
+@.Illegal use of \AT!...@>
+    loc-=2; if (phase==2) tok_ptr--; @<Clear |bal|...@>;
+  }
+}
+else if (c=='\\' && *loc!=at_sign && phase==2) app_tok(*(loc++))@;
+else if (c=='{') bal++;
+else if (c=='}') bal--;
+
+@ When the comment has terminated abruptly due to an error, we output
+enough right braces to keep \TeX\ happy.
+
+@<Clear |bal|...@>=
+app_tok(' '); /* this is done in case the previous character was `\.\\' */
+while (bal-- >0) app_tok('}');
+/* |if (see_end_of_line) next_control=end_of_line;| */
+return(0);
+
+@* Parsing.
+The most intricate part of \.{WEAVE} is its mechanism for converting
+\cee-like code into \TeX\ code, and we might as well plunge into this
+aspect of the program now. A ``bottom up'' approach is used to parse the
+\cee-like material, since \.{WEAVE} must deal with fragmentary
+constructions whose overall ``part of speech'' is not known.
+
+At the lowest level, the input is represented as a sequence of entities
+that we shall call {\it scraps}, where each scrap of information consists
+of two parts, its {\it category} and its {\it translation}. The category
+is essentially a syntactic class, and the translation is a token list that
+represents \TeX\ code. Rules of syntax and semantics tell us how to
+combine adjacent scraps into larger ones, and if we are lucky an entire
+\cee\ text that starts out as hundreds of small scraps will join
+together into one gigantic scrap whose translation is the desired \TeX\
+code. If we are unlucky, we will be left with several scraps that don't
+combine; their translations will simply be output, one by one.
+
+The combination rules are given as context-sensitive productions that are
+applied from left to right. Suppose that we are currently working on the
+sequence of scraps $s_1\,s_2\ldots s_n$. We try first to find the longest
+production that applies to an initial substring $s_1\,s_2\ldots\,$; but if
+no such productions exist, we find to find the longest production
+applicable to the next substring $s_2\,s_3\ldots\,$; and if that fails, we
+try to match $s_3\,s_4\ldots\,$, etc.
+
+A production applies if the category codes have a given pattern. For
+example, one of the productions is
+$$open\ math\ semi\ \RA\ open\ math$$
+and it means that three consecutive scraps whose respective categories are
+|open|, |math|, and |semi| are con\-verted to two scraps whose categories
+are |open| and |math|. This production also has an associated rule that
+tells how to combine the translation parts:
+$$\eqalign{O_2&=O_1\cr
+M_2&=M_1\,S\,\.{\\,}\,\hbox{|opt|\thinspace\tt5}\cr}$$
+This means that the |open| scrap has not changed, while the new |math| scrap
+has a translation $M_2$ composed of the translation $M_1$ of the original
+|math| scrap followed by the translation |S| of the |semi| scrap followed
+by `\.{\\,}' followed by `|opt|' followed by `\.5'. (In the \TeX\ file,
+this will specify an additional thin space after the semicolon, followed
+by an optional line break with penalty 50.) Translation rules use subscripts
+to distinguish between translations of scraps whose categories have the
+same initial letter; these subscripts are assigned from left to right.
+
+$\.{WEAVE}$ also has the production rule
+$$\hbox{|semi|$\;\RA\;$|terminator|}$$
+(meaning that a semicolon can terminate a \cee\ statement). Since
+productions are applied from left to right, this rule will be activated
+only if the |semi| is not preceded by scraps that match other productions;
+in particular, a |semi| that is preceded by `|open| |math|' will have
+disappeared because of the production above, and such semicolons do not
+act as statement terminators.
+
+The translation rule corresponding to $\hbox{|semi|$\;\RA\;$|terminator|}$ is
+$$T=S$$
+but we shall not mention translation rules in the common case that the
+translation of the new scrap on the right-hand side is simply the
+concatenation of the disappearing scraps on the left-hand side.
+
+
+
+@ The token lists for translated \TeX\ output contain some special control
+symbols as well as ordinary characters. These control symbols are
+interpreted by \.{WEAVE} before they are written to the output file.
+
+\yskip\hang |break_space| denotes an optional line break or an en space;
+
+\yskip\hang |force| denotes a line break;
+
+\yskip\hang |big_force| denotes a line break with additional vertical space;
+
+\yskip\hang |opt| denotes an optional line break (with the continuation
+line indented two ems with respect to the normal starting position)---this
+code is followed by an integer |n|, and the break will occur with penalty
+$10n$;
+
+\yskip\hang |backup| denotes a backspace of one em;
+
+\yskip\hang |cancel| obliterates any |break_space| or |force| or |big_force|
+tokens that immediately precede or follow it and also cancels any
+|backup| tokens that follow it;
+
+\yskip\hang |indent| causes future lines to be indented one more em;
+
+\yskip\hang |outdent| causes future lines to be indented one less em.
+
+\yskip\noindent All of these tokens are removed from the \TeX\ output that
+comes from \cee\ text between \pb\ signs; |break_space| and |force| and
+|big_force| become single spaces in this mode. The translation of other
+\cee\ texts results in \TeX\ control sequences \.{\\1}, \.{\\2},
+\.{\\3}, \.{\\4}, \.{\\5}, \.{\\6}, \.{\\7} corresponding respectively to
+|indent|, |outdent|, |opt|, |backup|, |break_space|, |force|, and
+|big_force|. However, a sequence of consecutive `\.\ ', |break_space|,
+|force|, and/or |big_force| tokens is first replaced by a single token
+(the maximum of the given ones).
+
+The tokens |math_rel| and |math_bin| will be translated into
+\.{\\mathrel\{} and \.{\\mathbin\{}, respectively.
+Also |math_op| to \.{\\mathop\{}.
+Other control sequences in the \TeX\ output will be `\.{\\\\\{}$\,\ldots\,$\.\}'
+surrounding identifiers, `\.{\\\&\{}$\,\ldots\,$\.\}' surrounding
+reserved words, `\.{\\.\{}$\,\ldots\,$\.\}' surrounding strings,
+`\.{\\cee\{}$\,\ldots\,$\.\}$\,$|force|' surrounding comments, and
+`\.{\\X$n$:}$\,\ldots\,$\.{\\X}' surrounding module names, where
+|n| is the module number.
+
+@d math_bin = @'205  /* should these be octal or decimal? */
+@d math_rel = @'206
+@d math_op = @'207
+@d big_cancel = @'210 /* like |cancel|, also overrides spaces */
+@d cancel = @'211 /* overrides |backup|, |break_space|, |force|, |big_force| */
+@d indent = cancel+1 /* one more tab (\.{\\1}) */
+@d outdent = cancel+2 /* one less tab (\.{\\2}) */
+@d opt = cancel+3 /* optional break in mid-statement (\.{\\3}) */
+@d backup = cancel+4 /* stick out one unit to the left (\.{\\4}) */
+@d break_space = cancel+5 /* optional break between statements (\.{\\5}) */
+@d force = cancel+6 /* forced break between statements (\.{\\6}) */
+@d big_force = cancel+7 /* forced break with additional space (\.{\\7}) */
+@d end_translation = big_force+1 /* special sentinel token at end of list */
+
+@ Here is a table of all the productions. The reader can best get a feel for
+@^productions, table of@>
+how they work by trying them out by hand on small examples; no amount of
+explanation will be as effective as watching the rules in action.
+Parsing can also be watched by debugging with `\.{@@2}'.
+
+@i grammar.web
+
+@* Implementing the productions.
+More specifically, a scrap is a structure consisting of a category
+|cat| and a |text_pointer| |trans|, which points to the translation in
+|tok_start|.  When \cee\ text is to be processed with the grammar above,
+we form an array |scrap_info| containing the initial scraps.
+Our production rules have the nice property that the right-hand side is never
+longer than the left-hand side. Therefore it is convenient to use sequential
+allocation for the current sequence of scraps. Five pointers are used to
+manage the parsing:
+
+\yskip\hang |pp| is a pointer into |scrap_info|.  We will try to match
+the category codes |pp->cat@,(pp+1)->cat|$\,\ldots\,$ to the left-hand sides
+of productions.
+
+\yskip\hang |scrap_base|, |lo_ptr|, |hi_ptr|, and |scrap_ptr| are such that
+the current sequence of scraps appears in positions |scrap_base| through
+|lo_ptr| and |hi_ptr| through |scrap_ptr|, inclusive, in the |cat| and
+|trans| arrays. Scraps located between |scrap_base| and |lo_ptr| have
+been examined, while those in positions |>=hi_ptr| have not yet been
+looked at by the parsing process.
+
+\yskip\noindent Initially |scrap_ptr| is set to the position of the final
+scrap to be parsed, and it doesn't change its value. The parsing process
+makes sure that |lo_ptr>=pp+3|, since productions have as many as four terms,
+by moving scraps from |hi_ptr| to |lo_ptr|. If there are
+fewer than |pp+3| scraps left, the positions up to |pp+3| are filled with
+blanks that will not match in any productions. Parsing stops when
+|pp=lo_ptr+1| and |hi_ptr=scrap_ptr+1|.
+
+Since the |scrap| structure will later be used for other purposes, we
+declare its second element as unions.
+
+@<Type...@>=
+typedef struct {
+  eight_bits cat;
+  eight_bits mathness;
+  union {
+    text_pointer Trans;
+    ===> @<Rest of |trans_plus| union@>@;
+  } trans_plus;
+} scrap;
+typedef scrap *scrap_pointer;
+
+@ @d trans = trans_plus.Trans /* translation texts of scraps */
+@d no_math = 2
+@d yes_math = 1
+@d maybe_math = 0
+@d left_math(A) = ((A)->mathness %4)
+@d right_math(A) = (((A)->mathness/4)%4)
+@d make_math(LM,RM) = ((eight_bits) (LM+4*(RM)))
+
+
+@<Global...@>=
+scrap scrap_info[max_scraps]; /* memory array for scraps */
+scrap_pointer scrap_info_end=scrap_info+max_scraps -1; /* end of |scrap_info| */
+scrap_pointer pp; /* current position for reducing productions */
+scrap_pointer scrap_base; /* beginning of the current scrap sequence */
+scrap_pointer scrap_ptr; /* ending of the current scrap sequence */
+scrap_pointer lo_ptr; /* last scrap that has been examined */
+scrap_pointer hi_ptr; /* first scrap that has not been examined */
+#ifdef STAT
+scrap_pointer max_scr_ptr; /* largest value assumed by |scrap_ptr| */
+#endif STAT
+
+@ @<Set init...@>=
+scrap_base=scrap_info+1;
+#ifdef STAT
+max_scr_ptr=
+#endif STAT
+scrap_ptr=scrap_info;
+
+@ Token lists in |@!tok_mem| are composed of the following kinds of
+items for \TeX\ output.
+
+\yskip\item{$\bullet$}ASCII codes and special codes like |force| and
+|math_rel| represent themselves;
+
+\item{$\bullet$}|id_flag+p| represents \.{\\\\\{{\rm identifier $p$}\}};
+
+\item{$\bullet$}|res_flag+p| represents \.{\\\&\{{\rm identifier $p$}\}};
+
+\item{$\bullet$}|mod_flag+p| represents module name |p|;
+
+\item{$\bullet$}|tok_flag+p| represents token list number |p|;
+
+\item{$\bullet$}|inner_tok_flag+p| represents token list number |p|, to be
+translated without line-break controls.
+
+@d id_flag = 10240 /* signifies an identifier */
+@d res_flag = 2*id_flag /* signifies a reserved word */
+@d mod_flag = 3*id_flag /* signifies a module name */
+@d tok_flag = 4*id_flag /* signifies a token list */
+@d inner_tok_flag = 5*id_flag /* signifies a token list in `\pb' */
+
+@u
+#ifdef DEBUG
+print_text(p) /* prints a token list */
+text_pointer p;
+{
+  token_pointer j; /* index into |tok_mem| */
+  sixteen_bits r; /* remainder of token after the flag has been stripped off */
+  if (p>=text_ptr) printf("BAD");
+  else for (j=*p; j<*(p+1); j++) {
+    r=*j%id_flag;
+    switch (*j/id_flag) {
+      case 1: printf("\\{"); print_id((name_dir+r)); printf("}"); break;
+ /* |id_flag| */
+      case 2: printf("\&{"); print_id((name_dir+r)); printf("}"); break;
+ /* |res_flag| */
+      case 3: printf("<"); print_id((name_dir+r)); printf(">"); break;
+        /* |mod_flag| */
+      case 4: printf("[[%d]]",r); break; /* |tok_flag| */
+      case 5: printf("|[[%d]]|",r); break; /* |inner_tok_flag| */
+      default: @<Print token |r| in symbolic form@>;
+    }
+  }
+}
+#endif DEBUG
+
+@ @<Print token |r|...@>=
+switch (r) {
+  case math_bin: printf("\\mathbin{"); break;
+  case math_op: printf("\\mathop{"); break;
+  case math_rel: printf("\\mathrel{"); break;
+  case big_cancel: printf("[ccancel]"); break;
+  case cancel: printf("[cancel]"); break;
+  case indent: printf("[indent]"); break;
+  case outdent: printf("[outdent]"); break;
+  case backup: printf("[backup]"); break;
+  case opt: printf("[opt]"); break;
+  case break_space: printf("[break]"); break;
+  case force: printf("[force]"); break;
+  case big_force: printf("[fforce]"); break;
+  case end_translation: printf("[quit]"); break;
+  default: putxchar(r);
+}
+
+@ The production rules listed above are embedded directly into the \.{WEAVE}
+program, since it is easier to do this than to write an interpretive system
+that would handle production systems in general. Several macros are defined
+here so that the program for each production is fairly short.
+
+All of our productions conform to the general notion that some |k|
+consecutive scraps starting at some position |j| are to be replaced by a
+single scrap of some category |c| whose translations is composed from the
+translations of the disappearing scraps. After this production has been
+applied, the production pointer |pp| should change by an amount |d|. Such
+a production can be represented by the quadruple |(j,k,c,d)|. For example,
+the production `|simp@,math| $\RA$ |math|' would be represented by
+`|(pp,2,math,-1)|'; in this case the pointer |pp| should decrease by 1
+after the production has been applied, because some productions with
+|math| in their second positions might now match, but no productions have
+|math| in the third or fourth position of their left-hand sides. Note that
+the value of |d| is determined by the whole collection of productions, not
+by an individual one. Consider the further example
+`|var_head@,math@,colon| $\RA$ |var_head@,intro|', which is represented by
+`|(pp+1,2,intro,+1)|'; the $+1$ here is deduced by looking at the
+grammar and seeing that no matches could possibly occur at positions |<=pp|
+after this production has been applied. The determination of |d| has been
+done by hand in each case, based on the full set of productions but not on
+the grammar of \cee\ or on the rules for constructing the initial
+scraps.
+
+We also attach a serial number of each production, so that additional
+information is available when debugging. For example, the program below
+contains the statement `|reduce(pp+1,2,intro,+1,52)|' when it implements
+the production just mentioned.
+
+Before calling |reduce|, the program should have appended the tokens of
+the new translation to the |tok_mem| array. We commonly want to append
+copies of several existing translations, and macros are defined to
+simplify these common cases. For example, |small_app2(pp)| will append the
+translations of two consecutive scraps, |trans[pp]| and |trans[pp+1]|, to
+the current token list. If the entire new translation is formed in this
+way, we write `|squash(j,k,c,d)|' instead of `|reduce(j,k,c,d)|'. For
+example, `|squash(pp,2,math,-1)|' is an abbreviation for `|small_app2(pp);
+reduce(pp,2,math,-1)|'.
+
+The code below is an exact translation of the production rules into
+\cee, using such macros, and the reader should have no difficulty
+understanding the format by comparing the code with the symbolic
+productions as they were listed earlier.
+
+@d app2(a) = app1(a);app1(a+1)@;
+@d app3(a) = app2(a);app1(a+2)@;
+@d app4(a) = app3(a);app1(a+3)@;
+@d small_app(a) = *(tok_ptr++)=a@;
+@d small_app1(a) = *(tok_ptr++)=tok_flag+(a)->trans-tok_start@;
+
+@<Global...@>=
+int init_mathness, last_mathness;
+
+@ @u app_str(s)
+ASCII *s;
+{
+  while (*s) small_app(*(s++));
+}
+
+app(a)
+token a;
+{
+ if (a==' ' || a>=big_cancel && a<=big_force) /* non-math token */ {
+  if (last_mathness==maybe_math) init_mathness=no_math;
+  else if (last_mathness==yes_math) small_app('$');
+  last_mathness=no_math;
+ }
+ else {
+  if (last_mathness==maybe_math) init_mathness=yes_math;
+  else if (last_mathness==no_math) small_app('$');
+  last_mathness=last_mathness=yes_math;
+ }
+ small_app(a);
+}
+app1(a)
+scrap_pointer a;
+{
+  switch (left_math(a)) { /* left boundary */
+  case (no_math):
+    if (last_mathness==maybe_math) init_mathness=no_math;
+    if (last_mathness==yes_math) small_app('$');
+    last_mathness = right_math(a); /* right boundary */
+    break;
+  case (yes_math):
+    if (last_mathness==maybe_math) init_mathness=yes_math;
+    else if (last_mathness==no_math) small_app('$');
+    last_mathness = right_math(a); /* right boundary */
+    break;
+  case (maybe_math): /* no changes */
+    break;
+  }
+  small_app(tok_flag+(a)->trans-tok_start);
+}
+
+@ Let us consider the big switch for productions now, before looking
+at its context. We want to design the program so that this switch
+works, so we might as well not keep ourselves in suspense about exactly what
+code needs to be provided with a proper environment.
+
+@<Match a production at |pp|, or increase |pp| if there is no match@>= {
+	/* |ignore_scrap| becomes part of the grammar */
+  @<Test for all of the productions@>@;
+  pp++; /* if no match was found, we move to the right */
+}
+
+@ It may be that during phase two we discover from some arrangement
+of the scraps that an identifier should be treated as a defining instance,
+meaning its index entry should be underlined.
+Since we're in phase two, the identifier is buried inside some scrap,
+which may contain other things as well.
+Using Spider to {\em star} a scrap causes the first identifier in that 
+scrap's translation to get an underlined index entry.
+The starring generates a call to |make_underlined|, which
+finds the first identifier with |first_id| and then underlines it
+with |underline_xref|.
+@u
+@<Definition of |first_id|@>@;
+make_underlined(p) 
+	/* underline the entry for the first identifier in |p->trans| */
+scrap_pointer p;
+{
+  sixteen_bits tok_value; /* a token: 
+			the name of this identifier, plus its flag */
+  /* Assume |p->trans < text_ptr| */
+
+  /* attempt to set |tok_value| to the first identifier in |p->trans| */
+  tok_value = first_id(p->trans);
+  if (tok_value==0) {
+#ifdef DEBUG
+    if (tracing>0) {
+	printf("\n! I couldn't find an identifier to underline.");
+	mark_harmless;
+    }
+#endif DEBUG
+    return;
+  }
+  if (tok_value<id_flag || tok_value>=res_flag)
+    fatal("", "! Internal error in first_id");
+@.Internal error in first_id@>
+  /* don't underline identifiers of length 1, even if starred --- force
+     the user to use |"@@!"| */
+  if (length(tok_value-id_flag+name_dir)>1)
+    underline_xref(tok_value-id_flag+name_dir);
+}
+
+@ |first_id| finds the first identifier in a translation.
+It is indefatigable.
+It returns a |token| value, or zero if it can't find an identifier.
+@<Definition of |first_id|@>=
+
+sixteen_bits first_id(p)
+	text_pointer p;
+{
+  token_pointer tp; /* used to search for the first identifier */
+  sixteen_bits r; /* remainder after modding out by |id_flag| */
+  sixteen_bits the_id; /* the id we find, or zero otherwise */
+
+  for (tp=*p; tp<*(p+1); tp++) {	
+    r=*tp%id_flag;
+    switch (*tp/id_flag) {
+      case 1:  /* |id_flag| --- found it */
+	return *tp;
+	break;
+      case 2: /* |res_flag| */
+      case 3: /* |mod_flag| */
+        goto next;
+	break;
+      case 4: /* |tok_flag| */
+      case 5: /* |inner_tok_flag| */
+	/* search the inner list */
+        if ((the_id = first_id(tok_start+r))!=0) return the_id;
+        goto next;
+	break;
+      default: 
+   	goto next;
+	break;
+    }
+    next: continue;
+  }
+  return 0;
+}
+ 
+@ We cannot use |new_xref| to underline a cross-reference at this point
+because this would just make a new cross-reference at the end of the list.
+We actually have to search through the list for the existing
+cross-reference.
+
+@u underline_xref(p)
+name_pointer p;
+{
+  xref_pointer q=(xref_pointer)p->xref; 
+		  /* pointer to cross-reference being examined */
+  xref_pointer r; /* temporary pointer for permuting cross-references */
+  sixteen_bits m; /* cross-reference value to be installed */
+  sixteen_bits n; /* cross-reference value being examined */
+  if (no_xref) return;
+  xref_switch=def_flag;
+  m=module_count+xref_switch;
+  while (q != xmem) {
+    n=q->num;
+    if (n==m) return;
+    else if (m==n+def_flag) {
+ q->num=m; return;
+    }
+    else if (n>=def_flag && n<m) break;
+    q=q->xlink;
+  }
+  @<Insert new cross-reference at |q|, not at beginning of list@>;
+}
+
+@ We get to this module only when the identifier is one letter long,
+so it didn't get a non-underlined entry during phase one.  But it may
+have got some explicitly underlined entries in later modules, so in order
+to preserve the numerical order of the entries in the index, we have
+to insert the new cross-reference not at the beginning of the list
+(namely, at |p->xref|), but rather right before |q|.
+
+@<Insert new cross-reference at |q|...@>=
+  append_xref(0); /* this number doesn't matter */
+  xref_ptr->xlink=(xref_pointer)p->xref; 
+  p->xref=(ASCII*)xref_ptr;
+  r=xref_ptr;
+  while (r->xlink!=q) {r->num=r->xlink->num; r=r->xlink;}
+  r->num=m; /* everything from |q| on is left undisturbed */
+
+
+
+@ The `|freeze_text|' macro is used to give official status to a token list.
+Before saying |freeze_text|, items are appended to the current token list,
+and we know that the eventual number of this token list will be the current
+value of |text_ptr|. But no list of that number really exists as yet,
+because no ending point for the current list has been
+stored in the |tok_start| array. After saying |freeze_text|, the
+old current token list becomes legitimate, and its number is the current
+value of |text_ptr-1| since |text_ptr| has been increased. The new
+current token list is empty and ready to be appended to.
+Note that |freeze_text| does not check to see that |text_ptr| hasn't gotten
+too large, since it is assumed that this test was done beforehand.
+
+@d freeze_text = *(++text_ptr)=tok_ptr@;
+
+@ @u reduce(j,k,c,d,n)
+scrap_pointer j;
+eight_bits c;
+short k, d, n;
+{
+  scrap_pointer i, i1; /* pointers into scrap memory */
+  j->cat=c; j->trans=text_ptr;
+  j->mathness=make_math(init_mathness,last_mathness);
+  freeze_text;
+  if (k>1) {
+    for (i=j+k, i1=j+1; i<=lo_ptr; i++, i1++) {
+      i1->cat=i->cat; i1->trans=i->trans;
+      i1->mathness=i->mathness;
+    }
+    lo_ptr=lo_ptr-k+1;
+  }
+  @<Change |pp| to $\max(|scrap_base|,|pp+d|)$@>;
+#ifdef DEBUG
+  @<Print a snapshot of the scrap list if debugging @>;
+#endif DEBUG
+  pp--; /* we next say |pp++| */
+}
+
+@ @<Change |pp| to $\max...@>=
+if (pp+d>=scrap_base) pp=pp+d;
+else pp=scrap_base;
+
+@ The `|squash|' 
+procedure takes advantage of the simplification that occurs when |k=1|.
+{\bf `|squash|' isn't used in Spidery \.{WEB}.}
+@u squash(j,k,c,d,n)
+scrap_pointer j;
+eight_bits c;
+short k, d, n;
+{
+  scrap_pointer i; /* pointers into scrap memory */
+  if (k==1) {
+    j->cat=c; @<Change |pp|...@>;
+#ifdef DEBUG
+    @<Print a snapshot...@>;
+#endif DEBUG
+    pp--; /* we next say |pp++| */
+    return;
+  }
+  for (i=j; i<j+k; i++) app1(i);
+  reduce(j,k,c,d,n);
+}
+
+@ Here now is the code that applies productions as long as possible. It
+requires two local labels (|found| and |done|), as well as a local
+variable (|i|).
+
+@<Reduce the scraps using the productions until no more rules apply@>=
+while (1) {
+  @<Make sure the entries |pp| through |pp+highestposoverall-1| 
+		of |cat| are defined@>;
+  if (tok_ptr+8>tok_mem_end || text_ptr+4>tok_start_end) {
+#ifdef STAT
+    if (tok_ptr>max_tok_ptr) max_tok_ptr=tok_ptr;
+    if (text_ptr>max_text_ptr) max_text_ptr=text_ptr;
+#endif STAT
+    stat_overflow("token/text");
+  }
+  if (pp>lo_ptr) break;
+  init_mathness=last_mathness=maybe_math;
+  @<Match a production...@>;
+}
+
+@ If we get to the end of the scrap list, category codes equal to zero are
+stored, since zero does not match anything in a production.
+
+@<Make sure the entries...@>=
+if (lo_ptr<pp+highestposoverall-1) {
+  while (hi_ptr<=scrap_ptr && lo_ptr!=pp+highestposoverall-1) {
+    (++lo_ptr)->cat=hi_ptr->cat; lo_ptr->mathness=(hi_ptr)->mathness;
+    lo_ptr->trans=(hi_ptr++)->trans;
+  }
+  for (i=lo_ptr+1;i<=pp+highestposoverall-1;i++) i->cat=0;
+}
+
+@ If \.{WEAVE} is being run in debugging mode, the production numbers and
+current stack categories will be printed out when |tracing| is set to 2;
+a sequence of two or more irreducible scraps will be printed out when
+|tracing| is set to 1.
+
+@<Global...@>=
+#ifdef DEBUG
+int tracing; /* can be used to show parsing details */
+#endif DEBUG
+
+@ @<Print a snapshot...@>= {
+  scrap_pointer k; /* pointer into |scrap_info| */
+  if (tracing==2) {
+    printf("\n%d:",n);
+    for (k=scrap_base; k<=lo_ptr; k++) {
+      if (k==pp) putxchar('*'); else putxchar(' ');
+      if (left_math(k) ==  yes_math) putchar('+');
+      else if (left_math(k) ==  no_math) putchar('-');
+      print_cat(k->cat);
+      if (right_math(k)==  yes_math) putchar('+');
+      else if (right_math(k) ==  no_math) putchar('-');
+    }
+    if (hi_ptr<=scrap_ptr) printf("..."); /* indicate that more is coming */
+  }
+}
+
+@ The |translate| function assumes that scraps have been stored in
+positions |scrap_base| through |scrap_ptr| of |cat| and |trans|. It
+appends a |terminator| scrap and begins to apply productions as much as
+possible. The result is a token list containing the translation of
+the given sequence of scraps.
+
+After calling |translate|, we will have |text_ptr+3<=max_texts| and
+|tok_ptr+6<=max_toks|, so it will be possible to create up to three token
+lists with up to six tokens without checking for overflow. Before calling
+|translate|, we should have |text_ptr<max_texts| and |scrap_ptr<max_scraps|,
+since |translate| might add a new text and a new scrap before it checks
+for overflow.
+
+@u text_pointer translate() /* converts a sequence of scraps */
+{
+  scrap_pointer i, /* index into |cat| */
+  j; /* runs through final scraps */
+  pp=scrap_base; lo_ptr=pp-1; hi_ptr=pp;
+  @<If tracing, print an indication of where we are@>;
+  @<Reduce the scraps...@>;
+  @<Combine the irreducible scraps that remain@>;
+}
+
+@ If the initial sequence of scraps does not reduce to a single scrap,
+we concatenate the translations of all remaining scraps, separated by
+blank spaces, with dollar signs
+placed according to the |mathness| of the scraps.
+
+@<Combine the irreducible...@>= {
+  @<If semi-tracing, show the irreducible scraps@>;
+  for (j=scrap_base; j<=lo_ptr; j++) {
+    if (j!=scrap_base) small_app(' ');
+    if ((left_math(j) == yes_math) && math_flag==0) small_app('$');
+    if ((left_math(j) == no_math) && math_flag==1) {
+    small_app(' '); small_app('$');}
+    small_app1(j);
+    if ((right_math(j) == yes_math) && math_flag==0) small_app('$');
+    if ((right_math(j) == no_math) && math_flag==1) {small_app('$');
+    small_app(' ');}
+    if (tok_ptr+6>tok_mem_end) stat_overflow("token");
+  }
+  freeze_text; return(text_ptr-1);
+}
+
+@ @<If semi-tracing, show the irreducible scraps@>=
+#ifdef DEBUG
+if (lo_ptr>scrap_base && tracing==1) {
+  printf("\nIrreducible scrap sequence in section %d:",module_count);
+  mark_harmless;
+  for (j=scrap_base; j<=lo_ptr; j++) {
+    printf(" "); print_cat(j->cat);
+  }
+}
+#endif DEBUG
+
+@ @<If tracing,...@>=
+#ifdef DEBUG
+if (tracing==2) {
+  printf("\nTracing after l. %d:\n",cur_line); mark_harmless;
+  if (loc>buffer+50) {
+    printf("...");
+    ASCII_write(loc-51,51);
+  }
+  else ASCII_write(buffer+1,loc-buffer);
+}
+#endif DEBUG
+
+@* Initializing the scraps.
+If we are going to use the powerful production mechanism just developed, we
+must get the scraps set up in the first place, given a \cee\ text.
+The raw input is converted into scraps according to the following table,
+which gives category codes followed by the translations. Sometimes a single
+item of input produces more than one scrap.
+\def\stars {\.{---}}%
+
+A comment in the input will be combined with the preceding
+|omega| or |semi| scrap, or with the following |terminator| scrap, if
+possible; otherwise it will be inserted as a separate |terminator| scrap.
+An additional ``comment'' is effectively appended at the end of the
+\PASCAL\ text, just before translation begins; this consists of a |cancel|
+token in the case of \PASCAL\ text in \pb, otherwise it consists of a
+|force| token.
+
+From this table it is evident that \.{WEAVE} will parse a lot of non-\PASCAL\
+programs. For example, the reserved words `\.{for}' and `\.{array}' are
+treated in an identical way by \.{WEAVE} from a syntactic standpoint,
+and semantically they are equivalent except that a forced line break occurs
+just before `\&{for}'; \PASCAL\ programmers may well be surprised at this
+similarity. The idea is to keep \.{WEAVE}'s rules as simple as possible,
+consistent with doing a reasonable job on syntactically correct \PASCAL\
+programs. The production rules below have been formulated in the same
+spirit of ``almost anything goes.''
+
+A table
+of the initial scraps corresponding to \cee\ tokens appeared above in the
+section on parsing; our goal now is to implement that table. We shall do this
+by implementing a subroutine called |C_parse| that is analogous to the
+|C_xref| routine used during phase one.
+
+Like |C_xref|, the |C_parse| procedure starts with the current
+value of |next_control| and it uses the operation |next_control=get_next|
+repeatedly to read \cee\ text until encountering the next `\v' or
+`\.\{' (begin comment symbol) , or until |next_control>=format|. The
+scraps corresponding to what
+it reads are appended into the |cat| and |trans| arrays, and |scrap_ptr|
+is advanced.
+
+|C_parse| should never be called with |next_control| equal to
+|begin_comment|, because the
+upper routines should be screening those out.
+
+@u C_parse(see_v) /* creates scraps from \cee\ tokens */
+	char see_v;
+{
+  name_pointer p; /* identifier designator */
+  while (next_control<format) {
+    @<Append the scrap appropriate to |next_control|@>;
+    next_control=get_next(see_v);
+    if (next_control==vertical_bar || next_control==begin_comment) return;
+  }
+}
+
+@ The following macro is used to append a scrap whose tokens have just
+been appended:
+
+@d app_scrap(c,M) = (++scrap_ptr)->cat=c; scrap_ptr->trans=text_ptr;
+scrap_ptr->mathness=make_math(M,M);
+freeze_text;
+
+@ @<Append the scr...@>=
+@<Make sure that there is room for at least four more scraps, six more
+tokens, and four more texts@>;
+switch (next_control) {
+	@<Cases for ordinary tokens@>@;
+  case string: case constant: case verbatim: @<Append a string or constant@>;
+    break;
+  case @`\n': @<Append a newline scrap@>; break;
+  case identifier: @<Append an identifier scrap@>; break;
+  case TeX_string: @<Append a \TeX\ string scrap@>; break;
+  case ignore: case vertical_bar: 
+	break;
+case xref_roman: case xref_wildcard: case xref_typewriter: 
+	break;
+  case thin_space: app_str("\\,"); app_scrap(SP_ignore_scrap,yes_math); break;
+  case math_break:
+ small_app(opt); app_str("0"); app_scrap(SP_ignore_scrap,yes_math); break;
+  case line_break:
+     app_str("\\0"); app_scrap(SP_ignore_scrap,yes_math); break;
+  case line_force:
+ small_app(force); app_scrap(SP_ignore_scrap,no_math); break;
+  case big_line_break:
+ small_app(big_force); app_scrap(SP_ignore_scrap,no_math); break;
+  case no_line_break:
+ small_app(big_cancel); small_app(' '); small_app(big_cancel);
+    app_scrap(SP_ignore_scrap,no_math); break;
+  case pseudo_semi: 
+@<Append a |pseudo_semi| scrap@>
+break; 
+  case join: app_str("\\J"); app_scrap(SP_ignore_scrap,no_math); break;
+  default: small_app(next_control); app_scrap(SP_ignore_scrap,no_math); break;
+}
+
+@ Since we haven't yet figured out how to compute the room required
+by looking at the productions, let's be paranoid.
+@d SCRAP_SLACK = 50
+@d TOK_SLACK = 50
+@d TEXT_SLACK = 50
+@<Make sure that there is room for at least four...@>=
+if (scrap_ptr+SCRAP_SLACK>scrap_info_end || tok_ptr+TOK_SLACK>tok_mem_end ||
+  text_ptr+TEXT_SLACK>tok_start_end) {
+#ifdef STAT
+  if (scrap_ptr>max_scr_ptr) max_scr_ptr=scrap_ptr;
+  if (tok_ptr>max_tok_ptr) max_tok_ptr=tok_ptr;
+  if (text_ptr>max_text_ptr) max_text_ptr=text_ptr;
+#endif STAT
+  stat_overflow("scrap/token/text");
+}
+
+@ Some nonstandard ASCII characters may have entered \.{WEAVE} by means of
+standard ones. They are converted to \TeX\ control sequences so that it is
+possible to keep \.{WEAVE} from stepping beyond standard ASCII.
+
+@ The following code must use |app_tok| instead of |small_app| in order to
+protect against overflow. Note that |tok_ptr+1<=max_toks| after |app_tok|
+has been used, so another |small_app| is legitimate before testing again.
+
+Many of the special characters in a string must be prefixed by `\.\\' so that
+\TeX\ will print them properly.
+@^special string characters@>
+
+@<Append a string or...@>=
+if (next_control==constant) app_str("\\O{");
+@.\\O@>
+else if (next_control==string) app_str("\\.{");
+@.\\.@>
+else app_str("\\={");
+@.\\=@>
+while (id_first<id_loc) {
+  if (*id_first==at_sign) {
+    if (*(id_first+1)==at_sign) id_first++;
+    else err_print("! Double at_sign should be used in strings");
+  }
+@.Double at_sign should be used...@>
+  @<Cause \TeX's special characters to be preceded with |'\\'|@>@;
+  app_tok(*id_first++);
+}
+small_app('}'); 
+@<Do the |app_scrap| for a string or constant@>@;
+
+@ @<Cause \TeX's special characters to be preceded with |'\\'|@>=
+switch (*id_first) {
+    case ' ':case '\\':
+    case '%':case '$': case '^':case '`':
+    case '#':
+    case '{': case '}':  case '~': case '&': case '_': 
+	small_app('\\'); break;
+
+  }
+
+@ @<Append a \TeX\ string scrap@>=
+app_str("\\hbox{"); while (id_first<id_loc) app_tok(*id_first++);
+small_app('}');
+@<Do the |app_scrap| for a string or constant@>@;
+
+
+@ When the `\v' that introduces \cee\ text is sensed, a call on
+|C_translate| will return a pointer to the \TeX\ translation of
+that text. If scraps exist in |scrap_info|, they are
+unaffected by this translation process.
+
+@u text_pointer C_translate()
+{
+  text_pointer p; /* points to the translation */
+  scrap_pointer save_base; /* holds original value of |scrap_base| */
+  save_base=scrap_base; scrap_base=scrap_ptr+1;
+  C_parse(1); /* get the scraps together */
+  if (next_control!=vertical_bar) err_print("! Missing vertical_bar after C text");
+@.Missing vertical_bar...@>
+  app_tok(cancel); app_scrap(SP_ignore_scrap,no_math);
+ /* place a |cancel| token as a final ``comment'' */
+  p=translate(); /* make the translation */
+#ifdef STAT
+ if (scrap_ptr>max_scr_ptr) max_scr_ptr=scrap_ptr;
+#endif STAT
+  scrap_ptr=scrap_base-1; scrap_base=save_base; /* scrap the scraps */
+  return(p);
+}
+
+@ The |outer_parse| routine is to |C_parse| as |outer_xref|
+is to |C_xref|: it constructs a sequence of scraps for \cee\ text
+until |next_control>=format|. Thus, it takes care of embedded comments.
+It will also do annotation duty.
+
+
+@u outer_parse() /* makes scraps from \cee\ tokens and comments */
+{
+  int bal; /* brace level in comment */
+  text_pointer p, q; /* partial comments */
+  while (next_control<format) {
+    if (next_control==begin_comment) {
+      @<Make sure that there is room for at least seven more
+        tokens, three more texts, and one more scrap@>; /* spider */
+      @<Copy comment, including embedded program text@>;
+    }
+    else {
+       C_parse(0);
+    }
+}
+}
+
+@ @<Copy comment, including embedded program text@>=
+      small_app(break_space); app_str("\\C{");
+@.\\cee@>
+      bal=copy_comment(1); next_control=vertical_bar;
+      while (bal>0) {
+ p=text_ptr; freeze_text; q=C_translate();
+         /* at this point we have |tok_ptr+6<=max_toks| */ /* spider */
+        small_app(tok_flag+p-tok_start); small_app(inner_tok_flag+q-tok_start);
+        if (next_control==vertical_bar) bal=copy_comment(bal);
+        else bal=0; /* an error has been reported */
+      }
+      small_app(force); 
+      app_scrap(SP_ignore_scrap,no_math);
+		 /* the full comment becomes a scrap */
+
+
+@ @<Make sure that there is room for at least seven more...@>=
+if (tok_ptr+TOK_SLACK>tok_mem_end || text_ptr+TEXT_SLACK>tok_start_end
+  || scrap_ptr+SCRAP_SLACK>scrap_info_end) {
+#ifdef STAT
+  if (scrap_ptr>max_scr_ptr) max_scr_ptr=scrap_ptr;
+  if (tok_ptr>max_tok_ptr) max_tok_ptr=tok_ptr;
+  if (text_ptr>max_text_ptr) max_text_ptr=text_ptr;
+#endif STAT
+  stat_overflow("token/text/scrap");
+}
+
+@i scraps.web
+
+@* Output of tokens.
+So far our programs have only built up multi-layered token lists in
+\.{WEAVE}'s internal memory; we have to figure out how to get them into
+the desired final form. The job of converting token lists to characters in
+the \TeX\ output file is not difficult, although it is an implicitly
+recursive process. Three main considerations had to be kept in mind when
+this part of \.{WEAVE} was designed:  (a) There are two modes of output,
+|outer| mode that translates tokens like |force| into line-breaking
+control sequences, and |inner| mode that ignores them except that blank
+spaces take the place of line breaks. (b) The |cancel| instruction applies
+to adjacent token or tokens that are output, and this cuts across levels
+of recursion since `|cancel|' occurs at the beginning or end of a token
+list on one level. (c) The \TeX\ output file will be semi-readable if line
+breaks are inserted after the result of tokens like |break_space| and
+|force|.  (d) The final line break should be suppressed, and there should
+be no |force| token output immediately after `\.{\\Y\\P}'.
+
+@ The output process uses a stack to keep track of what is going on at
+different ``levels'' as the token lists are being written out. Entries on
+this stack have three parts:
+
+\yskip\hang |end_field| is the |tok_mem| location where the token list of a
+particular level will end;
+
+\yskip\hang |tok_field| is the |tok_mem| location from which the next token
+on a particular level will be read;
+
+\yskip\hang |mode_field| is the current mode, either |inner| or |outer|.
+
+\yskip\noindent The current values of these quantities are referred to
+quite frequently, so they are stored in a separate place instead of in the
+|stack| array. We call the current values |cur_end|, |cur_tok|, and
+|cur_mode|.
+
+The global variable |stack_ptr| tells how many levels of output are
+currently in progress. The end of output occurs when an |end_translation|
+token is found, so the stack is never empty except when we first begin the
+output process.
+
+@d inner = 0 /* value of |mode| for \cee\ texts within \TeX\ texts */
+@d outer = 1 /* value of |mode| for \cee\ texts in modules */
+
+@<Typed...@>= typedef int mode;
+typedef struct {
+  token_pointer end_field; /* ending location of token list */
+  token_pointer tok_field; /* present location within token list */
+  boolean mode_field; /* interpretation of control tokens */
+} output_state;
+typedef output_state *stack_pointer;
+
+@ @d cur_end = cur_state.end_field /* current ending location in |tok_mem| */
+@d cur_tok = cur_state.tok_field /* location of next output token in |tok_mem| */
+@d cur_mode = cur_state.mode_field /* current mode of interpretation */
+@d init_stack = stack_ptr=stack;cur_mode=outer /* initialize the stack */
+
+@<Global...@>=
+output_state cur_state; /* |cur_end|, |cur_tok|, |cur_mode| */
+output_state stack[stack_size]; /* info for non-current levels */
+stack_pointer stack_ptr; /* first unused location in the output state stack */
+stack_pointer stack_end=stack+stack_size-1; /* end of |stack| */
+#ifdef STAT
+stack_pointer max_stack_ptr; /* largest value assumed by |stack_ptr| */
+#endif STAT
+
+@ @<Set init...@>=
+#ifdef STAT
+max_stack_ptr=stack;
+#endif STAT
+
+@ To insert token-list |p| into the output, the |push_level| subroutine
+is called; it saves the old level of output and gets a new one going.
+The value of |cur_mode| is not changed.
+
+@u push_level(p) /* suspends the current level */
+text_pointer p;
+{
+  if (stack_ptr==stack_end) stat_overflow("stack");
+  if (stack_ptr>stack) { /* save current state */
+    stack_ptr->end_field=cur_end;
+    stack_ptr->tok_field=cur_tok;
+    stack_ptr->mode_field=cur_mode;
+  }
+  stack_ptr++;
+#ifdef STAT
+  if (stack_ptr>max_stack_ptr) max_stack_ptr=stack_ptr;
+#endif STAT
+  cur_tok=*p; cur_end=*(p+1);
+}
+
+@ Conversely, the |pop_level| routine restores the conditions that were in
+force when the current level was begun. This subroutine will never be
+called when |stack_ptr=1|.
+
+@u pop_level()
+{
+  cur_end=(--stack_ptr)->end_field;
+  cur_tok=stack_ptr->tok_field; cur_mode=stack_ptr->mode_field;
+}
+
+@ The |get_output| function returns the next byte of output that is not a
+reference to a token list. It returns the values |identifier| or |res_word|
+or |mod_name| if the next token is to be an identifier (typeset in
+italics), a reserved word (typeset in boldface) or a module name (typeset
+by a complex routine that might generate additional levels of output).
+In these cases |cur_name| points to the identifier or module name in
+question.
+
+@<Global...@>=
+name_pointer cur_name;
+
+@ @d res_word = 0201 /* returned by |get_output| for reserved words */
+@d mod_name = 0200 /* returned by |get_output| for module names */
+
+@u eight_bits get_output() /* returns the next token of output */
+{
+  sixteen_bits a; /* current item read from |tok_mem| */
+  restart: while (cur_tok==cur_end) pop_level();
+  a=*(cur_tok++);
+  if (a>=0400) {
+    cur_name=a % id_flag + name_dir;
+    switch (a / id_flag) {
+      case 2: return(res_word); /* |a==res_flag+cur_name| */
+      case 3: return(mod_name); /* |a==mod_flag+cur_name| */
+      case 4: push_level(a % id_flag + tok_start); goto restart;
+ /* |a==tok_flag+cur_name| */
+      case 5: push_level(a % id_flag + tok_start); cur_mode=inner; goto restart;
+   /* |a==inner_tok_flag+cur_name| */
+      default: return(identifier); /* |a==id_flag+cur_name| */
+    }
+  }
+  return(a);
+}
+
+@ The real work associated with token output is done by |make_output|.
+This procedure appends an |end_translation| token to the current token list,
+and then it repeatedly calls |get_output| and feeds characters to the output
+buffer until reaching the |end_translation| sentinel. It is possible for
+|make_output| to be called recursively, since a module name may include
+embedded \cee\ text; however, the depth of recursion never exceeds one
+level, since module names cannot be inside of module names.
+
+A procedure called |output_C| does the scanning, translation, and
+output of \cee\ text within `\pb' brackets, and this procedure uses
+|make_output| to output the current token list. Thus, the recursive call
+of |make_output| actually occurs when |make_output| calls |output_C|
+while outputting the name of a module.
+@^recursion@>
+
+@u
+output_C() /* outputs the current token list */
+{
+  token_pointer save_tok_ptr;
+  text_pointer save_text_ptr;
+  sixteen_bits save_next_control; /* values to be restored */
+  text_pointer p; /* translation of the \cee\ text */
+  save_tok_ptr=tok_ptr; save_text_ptr=text_ptr;
+  save_next_control=next_control; next_control=vertical_bar; p=C_translate();
+  small_app(p-tok_start+inner_tok_flag);
+  make_output(); /* output the list */
+#ifdef STAT
+  if (text_ptr>max_text_ptr) max_text_ptr=text_ptr;
+  if (tok_ptr>max_tok_ptr) max_tok_ptr=tok_ptr;
+#endif STAT
+  text_ptr=save_text_ptr; tok_ptr=save_tok_ptr; /* forget the tokens */
+  next_control=save_next_control; /* restore |next_control| to original state */
+}
+
+@ Here is \.{WEAVE}'s major output handler.
+
+@u make_output() /* outputs the equivalents of tokens */
+{
+  eight_bits a, /* current output byte */
+  b; /* next output byte */
+  int c; /* count of |indent| and |outdent| tokens */
+  ASCII *k, *k_limit; /* indices into |byte_mem| */
+  ASCII *j; /* index into |buffer| */
+  ASCII delim; /* first and last character of string being copied */
+  ASCII *save_loc, *save_limit; /* |loc| and |limit| to be restored */
+  name_pointer cur_mod_name; /* name of module being output */
+  boolean save_mode; /* value of |cur_mode| before a sequence of breaks */
+  small_app(end_translation); /* append a sentinel */
+  freeze_text; push_level(text_ptr-1);
+  while (1) {
+    a=get_output();
+    reswitch: switch(a) {
+      case end_translation: return;
+      case identifier: case res_word: @<Output an identifier@>; break;
+      case mod_name: @<Output a module name@>; break;
+      case math_bin: case math_rel: case math_op:
+ @<Output a \.{\\math} operator@>; break;
+      case cancel: c=0; while ((a=get_output())>=indent && a<=big_force) {
+   if (a==indent) c++; if (a==outdent) c--;
+        }
+        @<Output saved |indent| or |outdent| tokens@>;
+        goto reswitch;
+      case big_cancel: c=0;
+ while (((a=get_output())>=indent || a==' ') && a<=big_force) {
+   if (a==indent) c++; if (a==outdent) c--;
+        }
+ @<Output saved...@>;
+ goto reswitch;
+      case indent: case outdent: case opt: case backup: case break_space:
+      case force: case big_force: @<Output a control,
+        look ahead in case of line breaks, possibly |goto reswitch|@>; break;
+      default: out(a); /* otherwise |a| is an ASCII character */
+    }
+  }
+}
+
+@ An identifier of length one does not have to be enclosed in braces, and it
+looks slightly better if set in a math-italic font instead of a (slightly
+narrower) text-italic font. Thus we output `\.{\\\char'174a}' but
+`\.{\\\\\{aa\}}'.
+
+@<Output an identifier@>=
+out('\\');
+if (a==identifier)
+  if (length(cur_name)==1) out('|')@;
+@.\\|@>
+  else out('\\')@;
+@.\\\\@>
+else out('&')@; /* |a==res_word| */
+@.\\\&@>
+if (length(cur_name)==1) out((cur_name->byte_start)[0])@;
+else out_name(cur_name);
+
+@ @<Output a \....@>=
+if (a==math_bin) out_str("\\mathbin{");
+else if (a==math_rel) out_str("\\mathrel{");
+else out_str("\\mathop{");
+
+@ The current mode does not affect the behavior of \.{WEAVE}'s output routine
+except when we are outputting control tokens.
+
+@<Output a control...@>=
+if (a<break_space) {
+  if (cur_mode==outer) {
+    out('\\'); out(a-cancel+'0');
+    if (a==opt) out(get_output()); /* |opt| is followed by a digit */
+    }
+  else if (a==opt) b=get_output(); /* ignore digit following |opt| */
+  }
+else @<Look ahead for strongest line break, |goto reswitch|@>@;
+
+@ If several of the tokens |break_space|, |force|, |big_force| occur in a
+row, possibly mixed with blank spaces (which are ignored),
+the largest one is used. A line break also occurs in the output file,
+except at the very end of the translation. The very first line break
+is suppressed (i.e., a line break that follows `\.{\\Y\\P}').
+
+@<Look ahead for st...@>= {
+  b=a; save_mode=cur_mode; c=0;
+  while (1) {
+    a=get_output();
+    if (a==cancel || a==big_cancel) {
+      @<Output saved |indent| or |outdent| tokens@>;
+      goto reswitch; /* |cancel| overrides everything */
+    }
+    if ((a!=' ' && a<indent) || a==backup || a>big_force) {
+      if (save_mode==outer) {
+ if (out_ptr>out_buf+3 && strncmp(out_ptr-3,"\\Y\\P",4)==0)
+   goto reswitch;
+        @<Output saved |indent| or |outdent| tokens@>;
+        out('\\'); out(b-cancel+'0');
+        if (a!=end_translation) finish_line();
+      }
+      else if (a!=end_translation && cur_mode==inner) out(' ');
+      goto reswitch;
+    }
+    if (a==indent) c++;
+    else if (a==outdent) c--;
+    else if (a>b) b=a; /* if |a==' '| we have |a<b| */
+  }
+}
+
+@ @<Output saved...@>=
+  for (;c>0;c--) out_str("\\1");
+  for (;c<0;c++) out_str("\\2");
+
+@ The remaining part of |make_output| is somewhat more complicated. When we
+output a module name, we may need to enter the parsing and translation
+routines, since the name may contain \cee\ code embedded in
+\pb\ constructions. This \cee\ code is placed at the end of the active
+input buffer and the translation process uses the end of the active
+|tok_mem| area.
+
+@<Output a module name@>= {
+  boolean is_file;
+  cur_xref=(xref_pointer)cur_name->xref;
+  is_file = cur_xref->num >= file_flag;
+
+  out_str((is_file? "\\XF":"\\X"));
+@.\\X@>
+  if (cur_xref->num>=def_flag) {
+    out_mod(cur_xref->num-(is_file ? file_flag : def_flag));
+    if (phase==3) {
+      cur_xref=cur_xref->xlink;
+      while (cur_xref->num>=def_flag) {
+ out_str(", ");
+        out_mod(cur_xref->num-(is_file ? file_flag : def_flag));
+      cur_xref=cur_xref->xlink;
+      }
+    }
+  }
+  else out('0'); /* output the module number, or zero if it was undefined */
+  out(':'); @<Output the text of the module name@>;
+  out_str((is_file? "\\XF":"\\X"));
+}
+
+@ @<Output the text...@>=
+k=cur_name->byte_start; k_limit=(cur_name+1)->byte_start;
+cur_mod_name=cur_name;
+while (k<k_limit) {
+  b=*(k++);
+  if (b==at_sign) @<Skip next character, give error if not `\.{@@}'@>@;
+  if (b!=vertical_char) out(b)@;
+  else {
+    @<Copy the \cee\ text into the |buffer| array@>@;
+    save_loc=loc; save_limit=limit; loc=limit+2; limit=j+1;
+    *limit=vertical_char; output_C();
+    loc=save_loc; limit=save_limit;
+  }
+}
+
+@ @<Skip next char...@>=
+if (*k++!=at_sign) {
+  printf("\n! Illegal control code in section name: <");
+@.Illegal control code...@>
+  print_id(cur_mod_name); printf("> "); mark_error;
+}
+
+@ The \cee\ text enclosed in \pb\ should not contain `\v' characters,
+except within strings. We put a `\v' at the front of the buffer, so that an
+error message that displays the whole buffer will look a little bit sensible.
+The variable |delim| is zero outside of strings, otherwise it
+equals the delimiter that began the string being copied.
+
+@<Copy the \cee\ text into...@>=
+j=limit+1; *j=vertical_char; delim=0;
+while (1) {
+  if (k>=k_limit) {
+    printf("\n! C text in section name didn't end: <");
+@.C text...didn't end@>
+    print_id(cur_mod_name); printf("> "); mark_error; break;
+  }
+  b=*(k++);
+  if (b==at_sign) @<Copy a control code into the buffer@>@;
+  else {
+    if (b=='\'' || b=='"')
+      if (delim==0) delim=b;
+      else if (delim==b) delim=0;
+    if (b!=vertical_char || delim!=0) {
+      if (j>buffer+long_buf_size-3) stat_overflow("buffer");
+      *(++j)=b;
+    }
+    else break;
+  }
+}
+
+@ @<Copy a control code into the buffer@>= {
+  if (j>buffer+long_buf_size-4) stat_overflow("buffer");
+  *(++j)=at_sign; *(++j)=*(k++);
+}
+
+@* Phase two processing.
+We have assembled enough pieces of the puzzle in order to be ready to specify
+the processing in \.{WEAVE}'s main pass over the source file. Phase two
+is analogous to phase one, except that more work is involved because we must
+actually output the \TeX\ material instead of merely looking at the
+\.{WEB} specifications.
+
+@u phase_two() {
+reset_input(); printf("\nWriting the output file...");
+module_count=0; copy_limbo();
+math_flag=0;
+finish_line(); flush_buffer(out_buf,0); /* insert a blank line, it looks nice */
+while (!input_has_ended) @<Translate the current module@>;
+}
+
+@ The output file will contain the control sequence \.{\\Y} between non-null
+sections of a module, e.g., between the \TeX\ and definition parts if both
+are nonempty. This puts a little white space between the parts when they are
+printed. However, we don't want \.{\\Y} to occur between two definitions
+within a single module. The variables |out_line| or |out_ptr| will
+change if a section is non-null, so the following macros `|save_position|'
+and `|emit_space_if_needed|' are able to handle the situation:
+
+@d save_position = save_line=out_line; save_place=out_ptr@;
+@d emit_space_if_needed = if (save_line!=out_line || save_place!=out_ptr)
+  out_str("\\Y");
+@.\\Y@>
+
+@<Global...@>=
+int save_line; /* former value of |out_line| */
+ASCII *save_place; /* former value of |out_ptr| */
+
+@ @<Translate the current module@>= {
+  module_count++;
+  @<Output the code for the beginning of a new module@>;
+  save_position;
+  @<Translate the \TeX\ part of the current module@>;
+  @<Translate the definition part of the current module@>;
+  @<Translate the \cee\ part of the current module@>;
+  @<Show cross-references to this module@>;
+  @<Output the code for the end of a module@>;
+}
+
+@ Modules beginning with the \.{WEB} control sequence `\.{@@\ }' start in the
+output with the \TeX\ control sequence `\.{\\M}', followed by the module
+number. Similarly, `\.{@@*}' modules lead to the control sequence `\.{\\N}'.
+If this is a changed module, we put \.{*} just before the module number.
+
+@<Output the code for the beginning...@>=
+if (*(loc-1)!='*') out_str("\\M");
+@.\\M@>
+else {
+  out_str("\\N");
+@.\\N@>
+  printf("*%d",module_count); update_terminal; /* print a progress report */
+}
+out_mod(module_count); out_str(". ");
+
+@ In the \TeX\ part of a module, we simply copy the source text, except that
+index entries are not copied and \cee\ text within \pb\ is translated.
+
+@<Translate the \T...@>= do {
+  next_control=copy_TeX();
+  switch (next_control) {
+    case vertical_bar: /* surround vertical bar with \.{\\CD...\\DC} */
+	out_str("\\CD{}"); 
+	init_stack; output_C(); 
+	out_str("\\DC{}"); 
+	break;
+    case at_sign: out(at_sign); break;
+    case octal: @<Translate an octal constant appearing in \TeX\ text@>; break;
+    case hex: @<Translate a hex constant appearing in \TeX\ text@>; break;
+    case TeX_string: case xref_roman: case xref_wildcard: case xref_typewriter:
+    case module_name: loc-=2; next_control=get_next(1); /* skip to \.{@@>} */
+      if (next_control==TeX_string)
+        err_print("! TeX string should be in C text only"); break;
+@.TeX string should be...@>
+    case thin_space: case math_break:
+    case line_break: case big_line_break: case no_line_break: case join:
+    case pseudo_semi: err_print("! You can't do that in TeX text"); break;
+@.You can't do that...@>
+  }
+} while (next_control<format);
+
+@ @<Translate an octal constant appearing in \TeX\ text@>= {
+out_str("\\O{\\~");
+  while ('0'<=*loc && *loc<'8') out(*loc++);
+out('}');
+}
+
+@ @<Translate a hex constant appearing in \TeX\ text@>= {
+out_str("\\O{\\^");
+  while (isxdigit(*loc)) {
+	out(islower(*loc) ? toupper(*loc):*loc);
+	loc++;
+	}
+out('}');
+}
+
+
+
+@ When we get to the following code we have |next_control>=format|, and
+the token memory is in its initial empty state.
+
+@<Translate the d...@>=
+if (next_control<=definition) { /* definition part non-empty */
+  emit_space_if_needed; save_position;
+}
+while (next_control<=definition) { /* |format| or |definition| */
+  init_stack;
+  if (next_control==definition) @<Start a macro definition@>@;
+  else @<Start a format definition@>;
+  outer_parse(); finish_C();
+}
+
+@ The |finish_C| procedure outputs the translation of the current
+scraps, preceded by the control sequence `\.{\\P}' and followed by the
+control sequence `\.{\\par}'. It also restores the token and scrap
+memories to their initial empty state.
+
+A |force| token is appended to the current scraps before translation
+takes place, so that the translation will normally end with \.{\\6} or
+\.{\\7} (the \TeX\ macros for |force| and |big_force|). This \.{\\6} or
+\.{\\7} is replaced by the concluding \.{\\par} or by \.{\\Y\\par}.
+
+@u finish_C() /* finishes a definition or a \cee\ part */
+{
+  text_pointer p; /* translation of the scraps */
+  out_str("\\P"); app_tok(force); app_scrap(SP_ignore_scrap,no_math);
+  p=translate();
+@.\\P@>
+  small_app(p-tok_start+tok_flag); make_output(); /* output the list */
+  if (out_ptr>out_buf+1)
+    if (*(out_ptr-1)=='\\')
+@.\\6@>
+@.\\7@>
+@.\\Y@>
+      if (*out_ptr=='6') out_ptr-=2; /* suppress ordinary force?! */
+      else if (*out_ptr=='7') *out_ptr='Y';
+  out_str("\\par"); finish_line();
+#ifdef STAT
+  if (text_ptr>max_text_ptr) max_text_ptr=text_ptr;
+  if (tok_ptr>max_tok_ptr) max_tok_ptr=tok_ptr;
+  if (scrap_ptr>max_scr_ptr) max_scr_ptr=scrap_ptr;
+#endif STAT
+  tok_ptr=tok_mem+1; text_ptr=tok_start+1; scrap_ptr=scrap_info;
+    /* forget the tokens and the scraps */
+}
+
+@ 
+@<Start a macro...@>= {
+  small_app(backup); app_str("\\D"); /* this will produce `\&{define}' */
+@.\\D@>
+@<Set |next_control| to the first non-newline token@>@;
+  if (next_control!=identifier)
+    err_print("! Improper macro definition");
+@.Improper macro definition@>
+  else {
+    small_app('$'); 
+    small_app(id_flag+id_lookup(id_first, id_loc,normal)-name_dir);
+    @<Scan the parameter list (if any), 
+	and set |next_control| to the non-newline 
+	token following the parameter list@>;
+    if (next_control==@`=') {
+        small_app('\\'); small_app('S'); /* equivalence sign */
+	@<Set |next_control| to the first non-newline token@>@;
+    } else {
+	err_print ("! Equals sign required in macro definition");
+@.Equals sign required...@>
+    }
+punt_the_definition:
+    small_app('$'); small_app(break_space);
+    app_scrap(SP_ignore_scrap,no_math); 
+		/* scrap won't take part in the parsing */
+  }
+}
+
+@ @<Quit scanning the macro definition@>=goto punt_the_definition;
+
+@ @<Scan the parameter list (if any), 
+	and set |next_control| to the non-newline 
+	token following the parameter list@>=
+@<Set |next_control| to the first non-newline token@>@;
+if (next_control==@`(') {
+	small_app(@`(');
+	do {
+	    @<Set |next_control| to the first non-newline token@>@;
+	    if (next_control==identifier) {
+                small_app(id_flag+id_lookup(id_first, id_loc,normal)-name_dir);
+		@<Set |next_control| to the first non-newline token@>@;
+	    } else {
+		err_print("! Improper macro definition"); 
+		@<Quit scanning the macro definition@>;
+	    }
+	    if (next_control==@`,' || next_control==@`)') 
+		small_app(next_control);
+	} while (next_control==@`,');
+	if (next_control != @`)') {
+	  err_print("! Macro parameter list must end with )");
+	  @<Quit scanning the macro definition@>;
+	}
+	@<Set |next_control| to the first non-newline token@>@;
+		 /* first token following parameter list */
+}
+
+
+
+
+@ @<Start a format...@>= {
+  app_str("\\F"); app_scrap(SP_ignore_scrap,no_math);
+      /* this will produce `\&{format}' */
+@.\\F@>
+@<Set |next_control| to the first non-newline token@>@;
+/* claim at this point |scrap_ptr==scrap_info+1| */
+  if (scrap_ptr!=scrap_info+1) {
+    err_print("! This can't happen -- bad scrap_ptr in format definition");
+    printf("\n\tscrap_ptr-scrap_info==%d\n",scrap_ptr-scrap_info);
+  }
+  if (next_control==identifier) {
+    small_app(id_flag+id_lookup(id_first, id_loc,normal)-name_dir);
+    app_str(" ");
+    app_scrap(SP_ignore_scrap,no_math); /*spider*/
+ /* this is syntactically separate from what follows */
+    @<Set |next_control| to the first non-newline token@>@;
+    if (next_control==identifier) {
+      small_app(id_flag+id_lookup(id_first, id_loc,normal)-name_dir);
+      small_app(@`\n');
+      app_scrap(SP_ignore_scrap,no_math);
+      @<Set |next_control| to the first non-newline token@>@;
+    }
+  }
+  /* if everything went well, we appended two scraps */
+  if (scrap_ptr!=scrap_info+3) err_print("! Improper format definition");
+@.Improper format definition@>
+}
+
+@ Finally, when the \TeX\ and definition parts have been treated, we have
+|next_control>=begin_unnamed|. We will make the global variable |this_module|
+point to the current module name, if it has a name.
+
+@<Global...@>=
+name_pointer this_module; /* the current module name, or zero */
+
+@ @<Translate the \cee...@>=
+this_module=name_dir;
+if (next_control<=module_name) {
+  emit_space_if_needed; init_stack;
+  if (next_control==begin_unnamed) next_control=get_next(0);
+  else {
+    this_module=cur_module;
+    @<Check that |=| follows this module name, and
+      emit the scraps to start the module definition@>;
+  }
+  while  (next_control<=module_name) {
+    outer_parse();
+    @<Emit the scrap for a module name if present@>;
+  }
+  finish_C();
+}
+
+@ @<Check that |=|...@>=
+do next_control=get_next(0);
+  while (next_control=='+'); /* allow optional `\.{+=}' */
+if (next_control!='=')
+  err_print("! You need an = sign after the section name");
+@.You need an = sign...@>
+  else next_control=get_next(0);
+if (out_ptr>out_buf+1 && *out_ptr=='Y' && *(out_ptr-1)=='\\') small_app(backup);
+    /* the module name will be flush left */
+@.\\Y@>
+small_app(mod_flag+this_module-name_dir);
+cur_xref=(xref_pointer)this_module->xref;
+app_str("${}");
+if (cur_xref->num%def_flag!=module_count) {
+  app_str("+"); /*module name is multiply defined*/
+  this_module=name_dir; /*so we won't give cross-reference info here*/
+}
+app_str("\\S"); /* output an equivalence sign */
+@.\\S@>
+app_str("{}$");
+small_app(force); 
+@<Call |app_scrap| for a module definition@>
+/* this forces a line break unless `\.{@@+}' follows */
+
+@ @<Emit the scrap...@>=
+if (next_control<module_name) {
+  err_print("! You can't do that in C text");
+@.You can"t do that...@>
+  next_control=get_next(1);
+}
+else if (next_control==module_name) {
+  if (cur_module_char!='<') {
+  err_print("! You can't use a file like a module");
+@.You can't use a file like a module@>
+  next_control=get_next(1);
+  } else {
+    small_app(mod_flag+cur_module-name_dir); 
+    @<Call |app_scrap| for a module use@>
+    next_control=get_next(1);
+  }
+}
+
+@ Cross references relating to a named module are given after the module ends.
+
+@<Show cross...@>=
+if (this_module>name_dir) {
+  @<Rearrange the list pointed to by |cur_xref|@>;
+  footnote(((((xref_pointer)this_module->xref)->num >= file_flag) 
+		? file_flag : def_flag)); 
+  footnote(0);
+}
+
+@ To rearrange the order of the linked list of cross-references, we need
+four more variables that point to cross-reference entries.  We'll end up
+with a list pointed to by |cur_xref|.
+
+@<Global...@>=
+xref_pointer next_xref, this_xref, first_xref, mid_xref;
+  /* pointer variables for rearranging a list */
+
+@ We want to rearrange the cross-reference list so that all the entries with
+|def_flag| come first, in ascending order; then come all the other
+entries, in ascending order.  There may be no entries in either one or both
+of these categories.
+
+@<Rearrange the list...@>=
+  first_xref=(xref_pointer)this_module->xref;
+  this_xref=first_xref->xlink; /* bypass current module number */
+  if (this_xref->num>def_flag) {
+    mid_xref=this_xref; cur_xref=0; /* this value doesn't matter */
+  do {
+    next_xref=this_xref->xlink; this_xref->xlink=cur_xref;
+    cur_xref=this_xref; this_xref=next_xref;
+  } while (this_xref->num>def_flag);
+  first_xref->xlink=cur_xref;
+}
+else mid_xref=xmem; /* first list null */
+cur_xref=xmem;
+while (this_xref!=xmem) {
+  next_xref=this_xref->xlink; this_xref->xlink=cur_xref;
+  cur_xref=this_xref; this_xref=next_xref;
+}
+if (mid_xref>xmem) mid_xref->xlink=cur_xref;
+else first_xref->xlink=cur_xref;
+cur_xref=first_xref->xlink;
+
+@ The |footnote| procedure gives cross-reference information about
+multiply defined module names (if the |flag| parameter is |def_flag|), or about
+the uses of a module name (if the |flag| parameter is zero). It assumes that
+|cur_xref| points to the first cross-reference entry of interest, and it
+leaves |cur_xref| pointing to the first element not printed.  Typical outputs:
+`\.{\\A\ section 101.}'; `\.{\\U\ sections 370 and 1009.}';
+`\.{\\A\ sections 8, 27\\*, and 64.}'.
+
+@u footnote(flag) /* outputs module cross-references */
+sixteen_bits flag;
+{
+  xref_pointer q; /* cross-reference pointer variable */
+  if (cur_xref->num<=flag) return;
+  finish_line(); out('\\');
+@.\\A@>
+@.\\U@>
+  if (flag==0) out('U')@;@+else out('A');
+  out_str(" section");
+  @<Output all the module numbers on the reference list |cur_xref|@>;
+  out('.');
+}
+
+@ The following code distinguishes three cases, according as the number
+of cross-references is one, two, or more than two. Variable |q| points
+to the first cross-reference, and the last link is a zero.
+
+@<Output all the module numbers...@>=
+q=cur_xref; if (q->xlink->num>flag) out('s'); /* plural */
+out('~');
+while (1) {
+  out_mod(cur_xref->num-flag);
+  cur_xref=cur_xref->xlink; /* point to the next cross-reference to output */
+  if (cur_xref->num<=flag) break;
+  if (cur_xref->xlink->num>flag || cur_xref!=q->xlink) out(',');
+    /* not the last of two */
+  out(' ');
+  if (cur_xref->xlink->num<=flag) out_str("and~"); /* the last */
+}
+
+@ @<Output the code for the end of a module@>=
+out_str("\\fi"); finish_line();
+@.\\fi@>
+flush_buffer(out_buf,0); /* insert a blank line, it looks nice */
+
+@* Phase three processing.
+We are nearly finished! \.{WEAVE}'s only remaining task is to write out the
+index, after sorting the identifiers and index entries.
+
+If the user has set the |no_xref| flag (the |-x| option on the command line),
+just finish off the page, omitting the index, module name list, and table of
+contents.
+
+@<Glob...@>=
+extern int no_xref;
+
+@ @u phase_three() {
+if (no_xref) {
+  finish_line();
+  out_str("\\vfill\\end");
+  finish_line();
+}
+else {
+  phase=3; printf("\nWriting the index...");
+  if (change_exists) {
+    finish_line(); @<Tell about changed modules@>;
+  }
+  finish_line(); out_str("\\inx"); finish_line();
+@.\\inx@>
+  @<Do the first pass of sorting@>;
+  @<Sort and output the index@>;
+  out_str("\\fin"); finish_line();
+@.\\fin@>
+  @<Output all the module names@>;
+  out_str("\\con"); finish_line();
+@.\\con@>
+}
+printf("Done.");
+check_complete(); /* was all of the change file used? */
+}
+
+@ Just before the index comes a list of all the changed modules, including
+the index module itself.
+
+@<Global...@>=
+sixteen_bits k_module; /* runs through the modules */
+
+@ @<Tell about changed modules@>= {
+  /* remember that the index is already marked as changed */
+  k_module=0;
+  while (!changed_module[++k_module]);
+  out_str("\\ch ");
+  out_mod(k_module);
+  while (1) {
+    while (!changed_module[++k_module]);
+    out_str(", "); out_mod(k_module);
+    if (k_module==module_count) break;
+  }
+  out('.');
+}
+
+@ A left-to-right radix sorting method is used, since this makes it easy to
+adjust the collating sequence and since the running time will be at worst
+proportional to the total length of all entries in the index. We put the
+identifiers into 102 different lists based on their first characters.
+(Uppercase letters are put into the same list as the corresponding lowercase
+letters, since we want to have `$t<\\{TeX}<\&{to}$'.) The
+list for character |c| begins at location |bucket[c]| and continues through
+the |blink| array.
+
+@<Global...@>=
+name_pointer bucket[128];
+name_pointer next_name; /* successor of |cur_name| when sorting */
+hash_pointer h; /* index into |hash| */
+name_pointer blink[max_names]; /* links in the buckets */
+
+@ To begin the sorting, we go through all the hash lists and put each entry
+having a nonempty cross-reference list into the proper bucket.
+
+@<Do the first pass...@>= {
+int c;
+for (c=0; c<=127; c++) bucket[c]=NULL;
+for (h=hash; h<=hash_end; h++) {
+  next_name=*h;
+  while (next_name) {
+    cur_name=next_name; next_name=cur_name->link;
+    if (((xref_pointer)cur_name->xref)!=xmem) {
+      c=(cur_name->byte_start)[0];
+      if (c<='Z' && c>='A') c=c+040;
+      blink[cur_name-name_dir]=bucket[c]; bucket[c]=cur_name;
+    }
+  }
+}
+}
+
+@ During the sorting phase we shall use the |cat| and |trans| arrays from
+\.{WEAVE}'s parsing algorithm and rename them |depth| and |head|. They now
+represent a stack of identifier lists for all the index entries that have
+not yet been output. The variable |sort_ptr| tells how many such lists are
+present; the lists are output in reverse order (first |sort_ptr|, then
+|sort_ptr-1|, etc.). The |j|th list starts at |head[j]|, and if the first
+|k| characters of all entries on this list are known to be equal we have
+|depth[j]=k|.
+
+@ @<Rest of |trans_plus| union@>=
+name_pointer Head;
+
+@
+@d depth = cat /* reclaims memory that is no longer needed for parsing */
+@d head = trans_plus.Head /* ditto */
+@d sort_pointer = scrap_pointer /* ditto */
+@d sort_ptr = scrap_ptr /* ditto */
+@d max_sorts = max_scraps /* ditto */
+
+@<Global...@>=
+eight_bits cur_depth; /* depth of current buckets */
+ASCII *cur_byte; /* index into |byte_mem| */
+sixteen_bits cur_val; /* current cross-reference number */
+#ifdef STAT
+sort_pointer max_sort_ptr; /* largest value of |sort_ptr| */
+#endif STAT
+
+@ @<Set init...@>=
+#ifdef STAT
+max_sort_ptr=scrap_info;
+#endif STAT
+
+
+@ The desired alphabetic order is specified by the |collate| array; namely,
+|collate[0]<collate[1]<@t$\cdots$@><collate[100]|.
+
+@<Global...@>=
+ASCII collate[102]; /* collation order */
+
+@ We use the order $\hbox{null}<\.\ <\hbox{other characters}<\.\_<
+\.A=\.a<\cdots<\.Z=\.z<\.0<\cdots<\.9.$
+
+@<Set init...@>=
+collate[0]=0; strcpy(collate+1," \1\2\3\4\5\6\7\10\11\12\13\14\15\16\17\
+\20\21\22\23\24\25\26\27\30\31\32\33\34\35\36\37\
+!\42#$%&'()*+,-./:;<=>?@@[\\]^`{|}~_\
+abcdefghijklmnopqrstuvwxyz0123456789");
+
+@ Procedure |unbucket| goes through the buckets and adds nonempty lists
+to the stack, using the collating sequence specified in the |collate| array.
+The parameter to |unbucket| tells the current depth in the buckets.
+Any two sequences that agree in their first 255 character positions are
+regarded as identical.
+
+@d infinity = 255 /* $\infty$ (approximately) */
+
+@u unbucket(d) /* empties buckets having depth |d| */
+eight_bits d;
+{
+  ASCII c;  /* index into |bucket| */
+  for (c=100; c>= 0; c--) if (bucket[collate[c]]) {
+    if (sort_ptr>=scrap_info_end) stat_overflow("sorting");
+    sort_ptr++;
+#ifdef STAT
+    if (sort_ptr>max_sort_ptr) max_sort_ptr=sort_ptr;
+#endif STAT
+    if (c==0) sort_ptr->depth=infinity;
+    else sort_ptr->depth=d;
+    sort_ptr->head=bucket[collate[c]]; bucket[collate[c]]=NULL;
+  }
+}
+
+@ @<Sort and output...@>=
+sort_ptr=scrap_info; unbucket(1);
+while (sort_ptr>scrap_info) {
+  cur_depth=sort_ptr->depth;
+  if (blink[sort_ptr->head-name_dir]==0 || cur_depth==infinity)
+    @<Output index entries for the list at |sort_ptr|@>@;
+  else @<Split the list at |sort_ptr| into further lists@>;
+}
+
+@ @<Split the list...@>= {
+  ASCII c;
+  next_name=sort_ptr->head;
+  do {
+    cur_name=next_name; next_name=blink[cur_name-name_dir];
+    cur_byte=cur_name->byte_start+cur_depth;
+    if (cur_byte==(cur_name+1)->byte_start) c=0; /* hit end of the name */
+    else {
+      c=*cur_byte;
+      if (c<='Z' && c>='A') c=c+040;
+    }
+  blink[cur_name-name_dir]=bucket[c]; bucket[c]=cur_name;
+  } while (next_name);
+  --sort_ptr; unbucket(cur_depth+1);
+}
+
+@ @<Output index...@>= {
+  cur_name=sort_ptr->head;
+  do {
+    out_str("\\:");
+@.\\:@>
+    @<Output the name at |cur_name|@>;
+    @<Output the cross-references at |cur_name|@>;
+    cur_name=blink[cur_name-name_dir];
+  } while (cur_name);
+  --sort_ptr;
+}
+
+@ @<Output the name...@>=
+switch (cur_name->ilk) {
+  case normal: if (length(cur_name)==1) out_str("\\|");
+    else out_str("\\\\"); break;
+@.\\|@>
+@.\\\\@>
+  case roman: break;
+  case wildcard: out_str("\\9"); break;
+@.\\9@>
+  case typewriter: out_str("\\."); break;
+@.\\.@>
+  default: out_str("\\&");
+@.\\\&@>
+}
+out_name(cur_name);
+
+@ Section numbers that are to be underlined are enclosed in
+`\.{\\[}$\,\ldots\,$\.]'.
+
+@<Output the cross-references...@>=
+@<Invert the cross-reference list at |cur_name|, making |cur_xref| the head@>;
+do {
+  out_str(", "); cur_val=cur_xref->num;
+  if (cur_val<def_flag) out_mod(cur_val);
+  else {out_str("\\["); out_mod(cur_val%def_flag); out(']');}
+@.\\[@>
+  cur_xref=cur_xref->xlink;
+} while (cur_xref!=xmem);
+out('.'); finish_line();
+
+@ List inversion is best thought of as popping elements off one stack and
+pushing them onto another. In this case |cur_xref| will be the head of
+the stack that we push things onto.
+
+@<Invert the cross-reference list at |cur_name|, making |cur_xref| the head@>=
+this_xref=(xref_pointer)cur_name->xref; cur_xref=xmem;
+do {
+  next_xref=this_xref->xlink; this_xref->xlink=cur_xref;
+  cur_xref=this_xref; this_xref=next_xref;
+} while (this_xref!=xmem);
+
+@ The following recursive procedure walks through the tree of module names and
+prints them.
+@^recursion@>
+
+@u mod_print(p) /* print all module names in subtree |p| */
+name_pointer p;
+{
+  boolean is_file;
+  if (p) {
+    mod_print(p->llink); 
+    cur_xref=(xref_pointer)p->xref;
+    is_file=((cur_xref->num)>=file_flag);
+    if ((is_file && do_file)||(!is_file && !do_file)) { /* C has no xor */
+        out_str("\\:");
+@.\\:@>
+        tok_ptr=tok_mem+1; text_ptr=tok_start+1; scrap_ptr=scrap_info; init_stack;
+        small_app(p-name_dir+mod_flag); make_output();
+        footnote(0); /* |cur_xref| was set by |make_output| */
+        finish_line();
+    }
+    mod_print(p->rlink);
+  }
+}
+
+@ Here we list files, then modules.
+@<Global...@>=boolean do_file;
+@ @<Output all the module names@>=
+do_file=(1==1);
+mod_print(root);
+do_file=(1==0);
+mod_print(root);
+
+
+
+@ @<Print statistics about memory usage@>=
+printf(
+"\nMemory usage statistics: %d of %d names, %d of %d cross-references,\n",
+  name_ptr-name_dir, name_dir_end-name_dir,
+  xref_ptr-xmem, xmem_end-xmem);
+printf("\t %d of %d bytes;",byte_ptr-byte_mem,byte_mem_end-byte_mem);
+printf("\nParsing required %d of %d(%d) scraps, %d of %d(%d) texts,\n",
+  max_scr_ptr-scrap_info, max_scraps, max_scraps-SCRAP_SLACK,
+  max_text_ptr-tok_start, max_texts, max_texts-TEXT_SLACK
+  );
+printf("\t %d of %d(%d) tokens, %d of %d levels;\n",
+  max_tok_ptr-tok_mem, max_toks, max_toks-TOK_SLACK,
+  max_stack_ptr-stack, stack_end-stack
+  );
+printf("\nSorting required %d levels\n", max_sort_ptr-scrap_info);
+
+@ @u
+stat_overflow(s)
+   char *s;
+{
+  printf("\n! Sorry, capacity exceeded: %s",s);
+#ifdef STAT
+  @<Print statistics about memory usage@>;
+#endif STAT
+  history=fatal_message; wrap_up();
+}
+
+@* Index.
+If you have read and understood the code for Phase III above, you know what
+is in this index and how it got here. All modules in which an identifier is
+used are listed with that identifier, except that reserved words are
+indexed only when they appear in format definitions, and the appearances
+of identifiers in module names are not indexed. Underlined entries
+correspond to where the identifier was declared. Error messages, control
+sequences put into the output, and a few
+other things like ``recursion'' are indexed here too.
+
+

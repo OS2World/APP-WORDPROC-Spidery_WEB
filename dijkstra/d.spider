@@ -1,0 +1,155 @@
+# Copyright 1989 by Norman Ramsey, Odyssey Research Associates
+# To be used for research purposes only
+# For more information, see file COPYRIGHT in the parent directory
+language Dijkstra
+
+at_sign @
+
+comment begin <"#"> end newline
+
+default translation <*> mathness yes
+
+token identifier category math mathness yes
+token number category math mathness yes
+token newline category ignore_scrap mathness maybe translation <>
+token pseudo_semi category semi mathness maybe translation <>
+
+module definition math use math
+
+token + category unorbinop
+token - category unorbinop
+token * category binop
+token / category binop
+token < category binop
+token > category binop
+token = category binop
+token . category binop
+token , category binop translation <",\\,">
+token : category binop
+token :: category binop translation <"\\CC">
+token ! category unop translation <"\\lnot">
+token & category binop translation <"\\land">
+token || category binop translation <"\\lor">
+token | category unop
+token ( category open
+token [ category open
+token ) category close
+token ] category close
+token ` category unop translation <"'"> mathness yes
+token { translation <"\\{"> category lbrace
+token } translation <"\\}"> category close
+token ; category semi
+token # category unop translation <"\\#">
+token := category binop translation <"\\CE">
+token != name not_eq translation <"\\I"> category binop
+token <= name lt_eq translation <"\\L"> category binop
+token >= name gt_eq translation <"\\G"> category binop
+token == name eq_eq translation <"\\S"> category binop
+token <=> translation <"\\IFF"> category binop
+token <-> translation <"\\IFF"> category binop
+token >> translation <"\\rangle"> category close
+token << translation <"\\langle"> category open
+token [] category box translation <"[]">
+# two-characer tokens must have a translation!!!! FIX!
+token -> category arrow translation <"\\RA">
+token => category binop translation <"\\RA">
+token ==> category binop translation <"\\LRA">
+token --> category arrow translation <"\\RA">
+
+# The following tokens are used in writing proofs
+token !<=> category shout translation <"\\IFF">
+token !<= category shout translation <"\\FF">
+token !== category shout translation <"\\S">
+
+math <indent-force> shout <outdent-force> math --> math
+
+
+macros begin
+\def\LRA{\Longrightarrow}
+\def\IFF{\Longleftrightarrow}
+\def\FF{\Longleftarrow}
+\def\DEF{\buildrel\triangle\over=}
+\def\CE{\mathrel{{:}{=}}}
+\def\CC{\mathrel{{:}{:}}}
+\let\RA\rightarrow
+\let\openbraces=\{
+\let\closebraces=\}
+\def\{{\ifmmode\openbraces\else$\openbraces$\fi}
+\def\}{\ifmmode\closebraces\else$\closebraces$\fi}
+macros end
+
+
+ilk if_like category if
+ilk fi_like category fi
+
+reserved if ilk if_like
+reserved fi ilk fi_like
+reserved do ilk if_like
+reserved od ilk fi_like
+
+ilk unop_like category unop translation <*-"\\"-space>
+reserved let ilk unop_like
+reserved invariant ilk unop_like
+reserved bound ilk unop_like
+
+ilk binop_like category binop translation <"\\"-space-*-"\\"-space>
+reserved satisfy ilk binop_like
+reserved sat ilk binop_like
+
+
+default mathness yes
+
+ilk math_like category math
+reserved true ilk math_like
+reserved false ilk math_like
+
+ilk member_like category math translation <"\\member">
+reserved member ilk member_like
+macros begin
+\def\member{\mathbin{\in}}
+macros end
+
+ilk empty_like category math translation <"\\varepsilon"> mathness yes
+reserved empty ilk empty_like
+
+ilk emptyset_like category math translation <"\\emptyset"> mathness yes
+reserved emptyset ilk emptyset_like
+
+ilk cross_like category unop translation <"\\times">
+reserved cross
+
+ilk forall_like category unop translation <"\\forall">
+reserved forall
+
+ilk exists_like category unop translation <"\\exists">
+reserved exists
+
+ilk number_like category unop translation <"\\number">
+reserved number
+macros begin
+\def\number{{\bf N}}
+macros end
+
+
+
+
+math <"\\"-space> math --> math
+math (binop|unorbinop) math --> math
+math unop --> math
+(unop|unorbinop) math --> math
+
+math semi <force> --> unop
+math <force> lbrace --> lbrace
+lbrace math close --> math
+# lbrace math close <force> --> unop
+
+open math close --> math
+open close --> math
+
+? ignore_scrap --> #1
+
+if <"\\"-space> math arrow <indent-force> --> ifbegin
+ifbegin math <outdent-force> box --> if
+ifbegin math <outdent-force> fi --> math
+
+

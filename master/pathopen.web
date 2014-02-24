@@ -1,0 +1,192 @@
+% Copyright 1989 by Norman Ramsey, Odyssey Research Associates
+% To be used for research purposes only
+% For more information, see file COPYRIGHT in the parent directory
+
+\def\title{Finding a file on a path}
+@*Introduction.
+This module is intended to make it easy for applications to open
+a file that is not necessarily in the current directory,
+but is somewhere on a search path.
+The notion is to specify the path ahead of time, so that
+calls to |fopen(n,"r")| can be replaced with calls to |pathopen(n)|.
+{\em No ASCII conversions are done; everything is in the character set of the 
+local machine.}
+
+@ The functions we export are:
+\medskip
+\noindent{\tabskip=0ptplus1fil
+\halign to \hsize{\vrule height 10pt depth3.5pt width0pt
+	\hfil#\tabskip=2em&\vtop{\hsize=4in
+	\noindent\ignorespaces#\par}
+	\tabskip=0ptplus1fil\cr
+\omit\hfil\strut{\bf Function name and signature}&
+\omit\bf What it does\hfil\cr
+\noalign{\smallskip}
+|pathreset()|&
+Initializes the system to search the empty path.
+This initialization is performed statically, so programs needn't call
+|pathreset|, but then they may not be serially reusable.
+\cr
+|pathaddname(char *)|&
+Adds the name to the search path (FIFO).
+If the first argument is |NULL| or points to the empty string, 
+|pathaddname| is a no-op.
+\cr
+|pathaddpath(char *, char)|&
+Adds the given path to the search path (FIFO).
+The second argument is the character that is used to separate names on
+the path, e.g. |pathaddpath(getenv("PATH"),':')|.
+If the first argument is |NULL| or points to the empty string, 
+|pathaddpath| is a no-op.
+\cr
+|FILE *pathopen(char *)|&
+Attempts to open (for read) 
+the given name, first in the current directory, then,
+if the name is not absolute (i.e. on UNIX doesn't begin with |'/'|),
+tries to open the name in each directory on the search path.
+If some |fopen| succeeds, it returns a pointer to a stream, otherwise it
+returns |NULL|.
+\cr
+}}
+
+@ We expect to be able to import:
+\medskip
+\noindent{\tabskip=0ptplus1fil
+\halign to \hsize{\vrule height 10pt depth3.5pt width0pt
+	\hfil#\tabskip=2em&\vtop{\hsize=4in
+	\noindent\ignorespaces#\par}
+	\tabskip=0ptplus1fil\cr
+\omit\hfil\strut{\bf Function name and signature}&
+\omit\bf What it does\hfil\cr
+\noalign{\smallskip}
+|overflow(char *)|&
+The |pathopen| routines will call |overflow| if they run out of space,
+e.g.~|overflow("path texts")|.
+\cr
+}}
+
+@ Here we set up the search path.
+It is a list of directories; if |pathopen| is handed a relative file name,
+it will look for it first in the current directory, and then in each
+directory on the search path.
+We allow up to |maxpaths| directories to be on the path, 
+and we set aside |pathtextlength| bytes for the names of those directories.
+We perform the initialization statically, so we don't {\em have} to call
+|pathreset|.
+
+We use Knuth's technique for storing the names: all the bytes are stored
+in |pathtexts|. 
+Pointers to the directories are stored in |searchpath|; the name of
+the |i|th directory is found in $|*(searchpath[i])|\ldots|*(seachpath[i+1])|$,
+where we start counting |i| from zero.
+|nextpath| contains the number directories already stored, and 
+|searchpath[nextpath]| points to the first free byte in |pathtexts|.
+This is all a little odd for those used to C's null-terminated strings, but
+it becomes second nature after a while.
+@d maxpaths = 64
+@d pathtextlength = 1024
+@u
+@<Included files@>@;
+
+static int nextpath=0;
+static char pathtexts[pathtextlength];
+static char *searchpath[maxpaths]={pathtexts};
+static char *maxpathtexts = pathtexts+pathtextlength;
+
+void pathreset()
+{
+	nextpath=0;
+	searchpath[nextpath]=pathtexts;
+}
+
+@ Here's how we add a name to the path
+@u
+void pathaddname(name)
+	char *name;
+{ char *t=searchpath[nextpath];
+  if (name==NULL) return;
+  if (nextpath>=maxpaths) overflow ("paths");
+  while (*name) {
+        if (t>=maxpathtexts) overflow("path texts");
+	*t++=*name++;
+  }
+  @<If path is null, decrement |nextpath| to cancel addition,
+	and if path is root, make it null@>@;
+  searchpath[++nextpath]=t;
+}
+
+@ @<If path is null...@>=
+if (t==searchpath[nextpath]) nextpath--;
+else if (t==searchpath[nextpath]+1 &&
+    *searchpath[nextpath]==directory_separator) /* path is root */ 
+	t--;
+
+@ Adding a path is slightly more complicated.
+@u
+void pathaddpath(path,path_separator)
+	char *path;
+	char path_separator;
+{
+  char *t=searchpath[nextpath];
+  if (path!=NULL) {
+    while (*path) {
+      if (nextpath>=maxpaths) overflow ("paths");
+      while(*path!=path_separator && *path!='\0') {
+        if (t>=maxpathtexts) overflow("path texts");
+  	*t++=*path++;
+      }
+      @<If path is null...@>@;
+      searchpath[++nextpath]=t;
+     if (*path) path++; /* skip separator */
+    }
+  }
+}
+  
+@ Now we define the function that attempts to open a file, searching
+on the path.
+We need to know whether a file name is absolute:
+@d directory_separator = '/' /* not converted to ASCII */
+@d absolute(n) = (*(n)==directory_separator)
+@d maxpathnamelength = 1024 /* longest path name we can create */
+@u
+FILE *pathopen(name)
+	char *name;
+{
+	FILE *fp; /* the stream we try to get */
+	char pathname[maxpathnamelength]; /* used to create pathnames */
+	char *s, *t; /* used to copy prefixes */
+	int i; /* used to search pathnames */
+
+	if (absolute(name)) 
+		return fopen(name,"r");
+	else {
+		if ((fp=fopen(name,"r"))!=NULL) return fp;
+		for (i=0; i<nextpath; i++) {
+			@<Try to open on path |i|, returning if not |NULL|@>@;
+		}
+	}
+	return NULL;
+}
+
+@ @<Included...@>=#include <stdio.h>
+
+@ @<Try to open on path |i|...@>=
+for(s=pathname,t=searchpath[i]; t<searchpath[i+1];) {
+	*s++ = *t++;
+	if (s>pathname+maxpathnamelength) overflow("path name length");
+}
+*s++=directory_separator;
+if (s>pathname+maxpathnamelength) overflow("path name length");
+t=name;
+while(*s++=*t++) 
+  if (s>pathname+maxpathnamelength) overflow("path name length");
+if ((fp=fopen(pathname,"r"))!=NULL) return fp;
+
+
+@ As a final service, we write declarations on file {\tt pathopen.h}
+@(pathopen.h@>=
+void pathaddname();
+void pathaddpath();
+void pathreset();
+FILE *pathopen();
+@* Index.

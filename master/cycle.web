@@ -1,0 +1,81 @@
+% Copyright 1989 by Norman Ramsey, Odyssey Research Associates
+% To be used for research purposes only
+% For more information, see file COPYRIGHT in the parent directory
+
+#*Detecting cycles in a directed graph of productions.
+{\tt SPIDER} writes a list of possibly cyclic productions on 
+{\tt cycle.test}.  The program {\tt cycle.awk} reads those and
+reports on whether there can be a cycle in the graph.
+If there were a cycle, it might lead to an infinite loop in \.{WEAVE}.
+One should inspect contexts to see if that could really happen.
+
+# Input is a list of edges in the form
+$$\hbox{\tt name leftnode --> rightnode}$$
+We detect a cycle if one exists.
+
+# We will use the following strategy: assemble all the edges, then
+read through them to label each node with the number of incoming edges
+and then the names of the successor nodes.
+We will then put nodes with no incoming edges on the work list, and
+remove them one by one, decrementing the incoming counts of their successors.
+If anything is left, there must be a cycle.
+#(cycle.awk#>=
+NF==4 && $3=="-->" {
+	incoming[$4]+=1
+	if (incoming[$2]=="") {
+		incoming[$2]=0
+		}
+	successors[$2]=successors[$2] " " $4
+	outgoing_edges[$2]=outgoing_edges[$2] $0 "\n"
+	next
+	}
+#=!/^ *$/#> {
+	print "What's all this?", $0
+	exit 1
+	}
+END {
+	#<Put all nodes with no incoming edges in |work[n]|, where
+		|0 <= n < high|#>
+	n=0
+	while (n<high) {
+		#<For each successor of |work[n]|, decrement the
+			incoming edge count and add to |work[]| if zero#>
+		n++
+		}
+	for (node in incoming) {
+		if (incoming[node]!=0) {
+			#<Announce a cycle and set |cycle=1|#>
+			}
+		}
+	if (cycle==0) {
+		print "There can't possibly be a cycle in the graph"
+	} else {
+		exit 0 ## no error until we check context
+		}
+	}
+
+# #<Put all nodes with no incoming edges in...#>=
+for (node in incoming) {
+	if (incoming[node]==0) {
+		work[high++]=node
+		}
+	}
+
+# #<For  each successor...#>=
+thisnode=work[n]
+temp=successors[thisnode]
+m = split(temp,newnodes," ")
+for (j=1; j<=m; j++) {
+	thisnode=newnodes[j]
+	incoming[thisnode]-=1
+	if (incoming[thisnode]==0) {
+		work[high++]=thisnode
+		}
+	}
+
+# #<Announce a cycle...#>=
+if (cycle==0) {
+	print "There is a potential cycle here somewhere -- check the context"
+	cycle=1
+	}
+printf "%s", outgoing_edges[node]

@@ -1,0 +1,2 @@
+/bin/make -f ../master/WebMakefile CPUTYPE=`cputype` \
+ THETANGLE=dtangle THEWEAVE=dweave SPIDER=d.spider $*

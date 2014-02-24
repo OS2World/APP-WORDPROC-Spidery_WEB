@@ -1,0 +1,1198 @@
+% Copyright 1989 by Norman Ramsey, Odyssey Research Associates
+% To be used for research purposes only
+% For more information, see file COPYRIGHT in the parent directory
+
+% This file is part of Spidery WEB
+
+% This program by Norman Ramsey is based on programs Silvio Levy
+% and D. E. Knuth.  Silvio Levy wrote most of the code.
+% It is distributed WITHOUT ANY WARRANTY, express or implied.
+% Dec 1987
+
+% Here is TeX material that gets inserted after \input webmac
+
+\message{OK, entering \string\batchmode...}
+\batchmode
+
+\def\hang{\hangindent 3em\indent\ignorespaces}
+\font\ninerm=cmr9
+\let\mc=\ninerm % medium caps
+\def\cee{C}
+\def\pb{$\.|\ldots\.|$} % C brackets (|...|)
+\def\v{\char'174} % vertical (|) in typewriter font
+\def\ceeref{{\it The C Reference Manual}}
+\mathchardef\RA="3221 % right arrow
+\mathchardef\BA="3224 % double arrow
+
+\def\title{Spidery COMMON}
+\def\contentspagenumber{1} % should be odd
+\def\topofcontents{\null\vfill
+  \titlefalse % include headline on the contents page
+  \def\rheader{\hfil}
+  \centerline{\titlefont Common Code in Spidery {\ttitlefont WEB}}
+  \vfill
+}
+
+
+@* Introduction.  This file contains code common
+to both \.{TANGLE} and \.{WEAVE}, that roughly concerns the following
+problems: character uniformity, input routines, error handling and
+parsing of command line.  We have tried to concentrate in this file
+all the system dependencies, so as to maximize portability.
+
+In the texts below we will
+sometimes use \.{WEB} to refer to either of the two component
+programs, if no confusion can arise.
+
+Here is the overall appearance of this file:
+
+@u@1
+#include <stdio.h>
+#ifdef MSDOS
+#define index strchr
+#endif
+
+@<External variables@>@;
+@<Global variables@>@;
+@<Definitions that should agree with \.{TANGLE} and \.{WEAVE}@>@;
+@<Other definitions@>@;
+@<Functions@>;
+
+@ In certain cases \.{TANGLE} and \.{WEAVE} should do almost, but not
+quite, the same thing.  In these case we've written common code for
+both, differentiating between the two by means of the global variable
+|program|.
+
+@d tangle = 0
+@d weave = 1
+
+@ Give us an at sign that isn't always `@@':
+@d at_sign = the_at_sign
+@<External...@>=
+extern char the_at_sign;
+
+
+@ @<Definitions...@>=
+typedef short boolean;
+typedef char unsigned eight_bits;
+boolean program; /* \.{WEAVE} or \.{TANGLE}? */
+
+@ \.{CWEAVE} operates in three phases: first it inputs the source
+file and stores cross-reference data, then it inputs the source once again and
+produces the \TeX\ output file, and finally it sorts and outputs the index.
+Similarly, \.{CTANGLE} operates in two phases.
+The global variable |phase| tells which phase we are in.
+
+@<Other...@>= int phase; /* which phase are we in? */
+
+@* The character set.
+One of the main goals in the design of \.{WEB} has been to make it readily
+portable between a wide variety of computers. Yet \.{WEB} by its very
+nature must use a greater variety of characters than most computer
+programs deal with, and character encoding is one of the areas in which
+existing machines differ most widely from each other.
+
+To resolve this problem, all input to \.{WEAVE} and \.{TANGLE} is converted
+to an internal seven-bit code that is essentially standard ASCII, the
+``American Standard Code for Information Interchange.''  The conversion
+is done immediately when each character is read in. Conversely,
+characters are converted from ASCII to the user's external
+representation just before they are output.
+
+Such an internal code can be accessed by users of \.{WEB} by means of
+constructions like \.{@@`A'}, which should be distinguished from
+\.{'A'}.  The former is transformed by
+\.{TANGLE} into an integer that is the internal code of \.A, but
+the latter, a |char| constant, is not touched by
+\.{WEB}, and will be interpreted by the \cee\ complier according to
+the machine's character set. (Actually, of course, it gets translated
+into \.{WEB}'s internal code just like any other character in the
+input file, but then it gets translated back at output time.)
+@^ASCII code@>
+
+Here is a table of the standard visible ASCII codes (\.{ } stands for
+a blank space):
+$$\def\:{\char\count255\global\advance\count255 by 1}
+\count255='40
+\vbox{
+\hbox{\hbox to 40pt{\it\hfill0\/\hfill}%
+\hbox to 40pt{\it\hfill1\/\hfill}%
+\hbox to 40pt{\it\hfill2\/\hfill}%
+\hbox to 40pt{\it\hfill3\/\hfill}%
+\hbox to 40pt{\it\hfill4\/\hfill}%
+\hbox to 40pt{\it\hfill5\/\hfill}%
+\hbox to 40pt{\it\hfill6\/\hfill}%
+\hbox to 40pt{\it\hfill7\/\hfill}}
+\vskip 4pt
+\hrule
+\def\^{\vrule height 10.5pt depth 4.5pt}
+\halign{\hbox to 0pt{\hskip -24pt\O{#0}\hfill}&\^
+\hbox to 40pt{\tt\hfill#\hfill\^}&
+&\hbox to 40pt{\tt\hfill#\hfill\^}\cr
+04&\:&\:&\:&\:&\:&\:&\:&\:\cr\noalign{\hrule}
+05&\:&\:&\:&\:&\:&\:&\:&\:\cr\noalign{\hrule}
+06&\:&\:&\:&\:&\:&\:&\:&\:\cr\noalign{\hrule}
+07&\:&\:&\:&\:&\:&\:&\:&\:\cr\noalign{\hrule}
+10&\:&\:&\:&\:&\:&\:&\:&\:\cr\noalign{\hrule}
+11&\:&\:&\:&\:&\:&\:&\:&\:\cr\noalign{\hrule}
+12&\:&\:&\:&\:&\:&\:&\:&\:\cr\noalign{\hrule}
+13&\:&\:&\:&\:&\:&\:&\:&\:\cr\noalign{\hrule}
+14&\:&\:&\:&\:&\:&\:&\:&\:\cr\noalign{\hrule}
+15&\:&\:&\:&\:&\:&\:&\:&\:\cr\noalign{\hrule}
+16&\:&\:&\:&\:&\:&\:&\:&\:\cr\noalign{\hrule}
+17&\:&\:&\:&\:&\:&\:&\:\cr}
+\hrule width 280pt}$$
+
+We introduce new types to distinguish between the transliterated characters
+and the characters in the outside world.  Let all
+``interesting'' values that a |char| variable may take lie between
+|first_text_char| and |last_text_char|; for the ASCII code we can
+take |first_text_char=0| and |last_text_char=@'177|. We will tell \.{WEB}
+to convert all input characters in this range to its own code, and balk at
+characters outside the range.  We make two assumptions:
+|first_text_char>=0| and |char| has room for at least eight bits.
+@^system dependencies@>
+
+@d first_text_char = 0 /* lowest interesting value of a |char| */
+@d last_text_char = @'177 /* highest interesting value of a |char| */
+
+@<Definitions...@>=
+typedef char ASCII; /* type of characters inside \.{WEB} */
+typedef char outer_char; /* type of characters outside \.{WEB} */
+
+@ The \.{WEAVE} and \.{TANGLE} processors convert between ASCII code and
+the user's external character set by means of arrays |xord| and |xchr|
+that are analogous to PASCAL's |ord| and |chr| functions.
+
+@<Definitions...@>=
+ASCII xord[last_text_char]; /* specifies conversion of input characters */
+outer_char xchr[@'200]; /* specifies conversion of output characters */
+
+@ Every system supporting \cee\ must be able to read and write the 95
+visible characters of standard ASCII above (although not necessarily using the
+ASCII codes to represent them).  Conversely, these characters, plus
+the newline, are sufficient to write any \cee\ program.  Other
+characters are desirable mainly in strings, and they can be referred
+to by means of escape sequences like \.{'\t'}.
+
+The basic implementation of \.{WEB}, then, only has to assign an
+|xord| to these 95 characters (newlines are swallowed by the reading
+routines).  The easiest way to do this is to assign the characters to
+their positions in |xchr| and then invert the correspondence:
+
+@<Functions...@>=
+common_init()
+{
+  strcpy(xchr,"                                 !\"#$%&'()*+,-./0123456789\
+:;<=>?@@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~ ");
+  @<System-dependent parts of character set@>;
+  @<Invert |xchr| to get |xord|@>;
+  @<Initialize pointers@>;
+  setting_up=1;
+  @<Scan arguments and open output files@>;
+  setting_up=0;
+}
+
+@ We use this variable to tell us what to do in |err_print|.
+@<Global var...@>=char setting_up;
+
+@ The following system-independent code makes the |xord| array contain
+a suitable inverse to the information in |xchr|.
+
+@<Invert |xchr|...@>= {
+  int i; /* to invert the correspondence */
+  for (i=first_text_char; i<=last_text_char; i++) 
+	xord[i]=@'40; /* ASCII code for space */
+  for (i=1; i<@'177; i++) xord[xchr[i]]=i;
+}
+
+@ Some \cee\ compilers, accept an extended character
+set, so that one can type things like \.^^Z\ instead of \.{!=}.
+If that's the case in your system, you should change this module,
+assigning positions |@'1| to |@'37| in the most convenient way;
+for example, at MIT you can just say
+$$\hbox{|for (i=1; i<=@'37; i++) xchr[i]=i;|}$$
+since \.{WEB}'s character set is essentially identical to MIT's,
+even with respect to characters less than |@'40| (see the definitions
+below).  If, however, the changes do not conform with these
+definitions you should change the definitions as well.
+@^system dependencies@>
+@^notes to myself@>
+
+@d and_and = @'4 /* `\.{\&\&}' */
+@d tab_mark = @'11 /* ASCII code used as tab-skip */
+@d line_feed = @'12 /* ASCII code thrown away at end of line */
+@d form_feed = @'14 /* ASCII code used at end of page */
+@d carriage_return = @'15 /* ASCII code used at end of line */
+@d gt_gt = @'20 /* `\.{>>}'; this doesn't exist in MIT */
+@d lt_lt = @'22 /* `\.{<<}'; this doesn't exist in MIT */
+@d plus_plus = @'13 /* `\.{++}'; this corresponds to MIT's up-arrow */
+@d minus_minus = @'1 /* `\.{--}'; this corresponds to MIT's down-arrow */
+@d minus_gt = @'31 /* `\.{->}' */
+@d not_eq = @'32 /* `\.{!=}' */
+@d lt_eq = @'34 /* `\.{<=}' */
+@d gt_eq = @'35 /* `\.{>=}' */
+@d eq_eq = @'36 /* `\.{==}' */
+@d or_or = @'37 /* `\.{\vert\vert}' */
+
+@<System-dependent parts of character set@>= /* nothing needs to be done */
+
+@* Input routines.  The lowest level of input to the \.{WEB} programs
+is performed by |input_ln|, which must be told which file to read from.
+The return value of |input_ln| is 1 if the read is successful and 0 if
+not (generally this means the file has ended). The conventions
+of \TeX\ are followed; i.e., the characters of the next line of the file
+are translated to |ASCII| code and copied into the |buffer| array,
+and the global variable |limit| is set to the first unoccupied position.
+Trailing blanks are ignored. The value of |limit| must be strictly less
+than |buf_size|, so that |buffer[buf_size-1]| is never filled.
+
+We assume that none of the |ASCII| values of |*j| for |buffer<=j<limit|
+is equal to 0, |@'177|, |line_feed|, |form_feed|, or |carriage_return|.
+Since |buf_size| is strictly less than |long_buf_size|,
+some of \.{WEB}'s routines use the fact that it is safe to refer to
+|*(limit+2)| without overstepping the bounds of the array.
+
+@d buf_size = 200 /* for \.{WEAVE} and \.{TANGLE} */
+@d long_buf_size = 500 /* for \.{WEAVE} */
+
+@<Definitions...@>=
+ASCII buffer[long_buf_size]; /* where each line of input goes */
+ASCII *buffer_end=buffer+buf_size-2; /* end of |buffer| */
+ASCII *limit; /* points to the last character in the buffer */
+ASCII *loc; /* points to the next character to be read from the buffer */
+
+@ In the unlikely event that you standard I/O library does not
+support |feof|, |getc| and |ungetc| you may have to change things here.
+@^system dependencies@>
+
+@<Func...@>=
+#include <stdio.h>
+input_ln(fp) /* copies a line into |buffer| or returns 0 */
+FILE *fp; /* what file to read from */
+{
+  register int  c; /* the character read */
+  register ASCII *k;  /* where next character goes */
+  if (feof(fp)) return(0);  /* we have hit end-of-file */
+  limit = k = buffer;  /* beginning of buffer */
+  while (k<=buffer_end && (c=getc(fp)) != EOF && c!='\n')
+    if ((*(k++) = xord[c]) != @` ') limit = k;
+  if (k>buffer_end)
+    if ((c=getc(fp))!=EOF && c!='\n') {
+      ungetc(c,fp); loc=buffer; err_print("\n! Input line too long");
+@.Input line too long@>
+  }
+  if (c==EOF && limit==buffer) return(0);  /* there was nothing after
+    the last newline */
+  return(1);
+}
+
+@ Now comes the problem of deciding which file to read from next.
+Recall that the actual text that \.{WEB} should process comes from two
+streams: a |web_file|, which can contain possibly nested include
+commands `|@i|', and a |change_file|, which should not contain
+includes.  The |web_file| together with the currently open include
+files form a stack |file|, whose names are stored in a parallel stack
+|file_name|.  The boolean |changing| tells whether or not we're reading
+form the |change_file|.
+
+The line number of each open file is also kept for error reporting and
+for the benefit of \.{TANGLE}.
+
+@f line x /* make |line| an unreserved word */
+@d max_include_depth = 10 /* maximum number of source files open
+  simultaneously, not counting the change file */
+@d max_file_name_length = 60
+@d cur_file = file[include_depth] /* current file */
+@d cur_file_name = file_name[include_depth] /* current file name */
+@d cur_line = line[include_depth] /* number of current line in current file */
+@d web_file = file[0] /* main source file */
+@d web_file_name = file_name[0] /* main source file name */
+
+@<Definitions...@>=
+int include_depth; /* current level of nesting */
+FILE *file[max_include_depth]; /* stack of non-change files */
+FILE *change_file; /* change file */
+char file_name[max_include_depth][max_file_name_length];
+  /* stack of non-change file names */
+char change_file_name[max_file_name_length]; /* name of change file */
+int line[max_include_depth]; /* number of current line in the stacked files */
+int change_line; /* number of current line in change file */
+boolean input_has_ended; /* if there is no more input */
+boolean changing; /* if the current line is from |change_file| */
+
+@ When |changing=0|, the next line of |change_file| is kept in
+|change_buffer|, for purposes of comparison with the next
+line of |cur_file|. After the change file has been completely input, we
+set |change_limit=change_buffer|, so that no further matches will be made.
+
+Here's a shorthand expression for inequality between the two lines:
+
+@d lines_dont_match = (change_limit-change_buffer != limit-buffer ||
+  strncmp(buffer, change_buffer, limit-buffer))
+
+@<Other...@>=
+ASCII change_buffer[buf_size]; /* where next line of |change_file| is kept */
+ASCII *change_limit; /* points to the last character in |change_buffer| */
+
+@ Procedure |prime_the_change_buffer| sets |change_buffer| in preparation
+for the next matching operation. Since blank lines in the change file are
+not used for matching, we have |(change_limit==0 && !changing)| if and
+only if the change file is exhausted. This procedure is called only
+when |changing| is 1; hence error messages will be reported correctly.
+
+@<Func...@>=
+prime_the_change_buffer()
+{
+  change_limit=0; /* this value will be used if the change file ends */
+  @<Skip over comment lines in the change file; |return| if end of file@>;
+  @<Skip to the next nonblank line; |return| if end of file@>;
+  @<Move |buffer| and |limit| to |change_buffer| and |change_limit|@>;
+}
+
+@ While looking for a line that begins with \.{@@x} in the change file,
+we allow lines that begin with \.{@@}, as long as they don't begin with
+\.{@@y} or \.{@@z} (which would probably indicate that the change file is
+fouled up).
+
+@<Skip over comment lines in the change file...@>=
+while(1) {
+  change_line++;
+  if (!input_ln(change_file)) return;
+  if (limit<buffer+2) continue;
+  if (buffer[0]!=the_at_sign) continue;
+  @<Lowercasify |buffer[1]|@>;
+  @<Check for erroneous \.{@@i}@>;
+  if (buffer[1]==@`x') break;
+  if (buffer[1]==@`y' || buffer[1]==@`z') {
+    loc=buffer+2;
+    err_print("! Where is the matching @@x?");
+@.Where is the match...@>
+  }
+}
+
+@ This line of code makes |"@@X"| equivalent to |"@@x"| and so on.
+
+@<Lowerc...@>=
+if (buffer[1]>=@`X' && buffer[1]<=@`Z' || buffer[1]==@`I') buffer[1]+=@`z'-@`Z';
+
+@ We do not allow includes in a change file, so as to avoid confusion.
+
+@<Check for erron...@>= {
+  if (buffer[1]==@`i') {
+    loc=buffer+2;
+    err_print("! No includes allowed in change file");
+@.No includes allowed...@>
+  }
+}
+
+@ Here we are looking at lines following the \.{@@x}.
+
+@<Skip to the next nonblank line...@>=
+do {
+  change_line++;
+  if (!input_ln(change_file)) {
+    err_print("! Change file ended after @@x");
+@.Change file ended...@>
+    return;
+  }
+} while (limit==buffer);
+
+@ @<Move |buffer| and |limit| to |change_buffer| and |change_limit|@>=
+{
+  change_limit=change_buffer-buffer+limit;
+  strncpy(change_buffer,buffer,limit-buffer+1);
+}
+
+@ The following procedure is used to see if the next change entry should
+go into effect; it is called only when |changing| is 0.
+The idea is to test whether or not the current
+contents of |buffer| matches the current contents of |change_buffer|.
+If not, there's nothing more to do; but if so, a change is called for:
+All of the text down to the \.{@@y} is supposed to match. An error
+message is issued if any discrepancy is found. Then the procedure
+prepares to read the next line from |change_file|.
+
+@<Func...@>=
+check_change() /* switches to |change_file| if the buffers match */
+{
+  int n=0; /* the number of discrepancies found */
+  if (lines_dont_match) return;
+  while (1) {
+    changing=1; print_where=1; change_line++;
+    if (!input_ln(change_file)) {
+      err_print("! Change file ended before @@y");
+@.Change file ended...@>
+      change_limit=0; changing=0; print_where=1;
+      return;
+    }
+    if (limit>buffer+1 && buffer[0]==the_at_sign)
+      @<Check for erron...@>;
+    @<If the current line starts with \.{@@y},
+      report any discrepancies and |return|@>;@/
+    @<Move |buffer| and |limit|...@>;@/
+    changing=0; print_where=1; cur_line++;
+    while (!input_ln(cur_file)) { /* pop the stack or quit */
+      if (include_depth==0) {
+        err_print("! WEB file ended during a change");
+@.WEB file ended...@>
+        input_has_ended=1; return;
+      }
+      include_depth--; print_where=1; cur_line++;
+    }
+    if (lines_dont_match) n++;
+  }
+}
+
+@ @<If the current line starts with \.{@@y}...@>=
+if (limit>buffer+1 && buffer[0]==the_at_sign) {
+  @<Lowerc...@>;
+  if (buffer[1]==@`x' || buffer[1]==@`z') {
+    loc=buffer+2; err_print("! Where is the matching @@y?");
+@.Where is the match...@>
+    }
+  else if (buffer[1]==@`y') {
+    if (n>0) {
+      loc=buffer+2;
+      err_print("! Hmm... some of the preceding lines failed to match");
+@.Hmm... some of the preceding...@>
+    }
+    return;
+  }
+}
+
+@ The |reset_input| procedure, which gets \.{CWEAVE} ready to read the
+user's \.{WEB} input, is used at the beginning of phases one and two.
+
+@<Func...@>=
+reset_input()
+{
+  limit=buffer; loc=buffer+1; buffer[0]=@` ';
+  @<Open input files@>;
+  cur_line=0; change_line=0; include_depth=0;
+  changing=1; prime_the_change_buffer(); changing=!changing;
+  limit=buffer; loc=buffer+1; buffer[0]=@` '; input_has_ended=0;
+}
+
+@ The following code opens the input files.
+@^system dependencies@>
+For the input files, we {\em don't} look on the search path.
+@<Open input files@>=
+if ((web_file=fopen(web_file_name,"r"))==NULL)
+	fatal("! Cannot open input file ", web_file_name);
+if ((change_file=fopen(change_file_name,"r"))==NULL)
+	fatal("! Cannot open change file ", change_file_name);
+
+@ The |get_line| procedure is called when |loc>limit|; it puts the next
+line of merged input into the buffer and updates the other variables
+appropriately. A space is placed at the right end of the line.
+This procedure returns |!input_has_ended| because we often want to
+check the value of that variable after calling the procedure.
+
+If we've just changed from the |cur_file| to the |change_file|, or if
+the |cur_file| has changed, we tell \.{TANGLE} to print this
+information in the \cee\ file by means of the |print_where| flag.
+
+@d max_modules = 2000 /* number of identifiers, strings, module names;
+  must be less than 10240 */
+
+
+
+@<Defin...@>=
+typedef unsigned short sixteen_bits;
+sixteen_bits module_count; /* the current module number */
+boolean changed_module[max_modules]; /* is the module changed? */
+boolean print_where=0; /* tells \.{TANGLE} to print line and file info */
+
+@ @<Fun...@>=
+get_line() /* inputs the next line */
+{
+  restart:
+  if (changing) changed_module[module_count]=1;
+  else @<Read from |cur_file| and maybe turn on |changing|@>;
+  if (changing) {
+    @<Read from |change_file| and maybe turn off |changing|@>;
+    if (! changing) {
+      changed_module[module_count]=1; goto restart;
+    }
+  }
+  loc=buffer; *limit=@` ';
+  if (*buffer==the_at_sign && (*(buffer+1)==@`i' || *(buffer+1)==@`I'))
+    @<Push stack and go to |restart|@>;
+  return (!input_has_ended);
+}
+
+@ When a \.{@@i} line is found in the |cur_file|, we must temporarily
+stop reading it and start reading from the named include file.  The
+\.{@@i} line should give a complete file name with or without \.{"..."};
+\.{WEB} will look for include files in standard directories using
+the |pathopen| module.
+That is set up at the beginning using the {\tt -I} arguments 
+and the {\tt WEBPATH} environment variable.
+@<Add environment variable |"WEBPATH"| to search path@>=
+	pathaddpath(getenv("WEBPATH"),':');
+@ @<Add path name from {\tt -I} to search path@>=
+	pathaddname(*argv+2);
+@ @<Other...@>=
+@i pathopen.h
+@ We need to define an |overflow| {\em function} for |pathopen| to call.
+@ @<Functions@>=
+void @= overflow @>(s)
+	char *s;
+{ overflow(s);}
+@ The included file name should only contain visible ASCII characters,
+since the characters are translated into ASCII and back again.
+
+@<Push stack and...@>= {
+  ASCII *k, *j;
+  loc=buffer+2;
+  while (loc<=limit && (*loc==@` '||*loc==@`\t'||*loc==@`"')) loc++;
+  if (loc>=limit) err_print("! Include file name not given");
+@.Include file name not given@>
+  else {
+    if (++include_depth<max_include_depth) {
+      k=cur_file_name; j=loc;
+      while (*loc!=@` '&&*loc!=@`\t'&&*loc!=@`"') *k++=xchr[*loc++];
+      *k='\0';
+      if ((cur_file=pathopen(cur_file_name,"r"))==NULL) {
+        loc=j;
+        include_depth--;
+        err_print("! Cannot find include file on path");
+@.Cannot find include file on path@>
+      }
+      else {cur_line=0; print_where=1;}
+    }
+    else {
+      include_depth--;
+      err_print("! Too many nested includes");
+@.Too many nested includes@>
+    }
+  }
+  goto restart;
+}
+
+@ @<Read from |cur_file|...@>= {
+  cur_line++;
+  while (!input_ln(cur_file)) { /* pop the stack or quit */
+    print_where=1;
+    if (include_depth==0) {input_has_ended=1; break;}
+    else {fclose(cur_file); include_depth--; cur_line++;}
+  }
+  if (!input_has_ended)
+  if (limit==change_limit-change_buffer+buffer)
+    if (buffer[0]==change_buffer[0])
+      if (change_limit>change_buffer) check_change();
+}
+
+@ @<Read from |change_file|...@>= {
+  change_line++;
+  if (!input_ln(change_file)) {
+    err_print("! Change file ended without @@z");
+@.Change file ended...@>
+    buffer[0]=the_at_sign; buffer[1]=@`z'; limit=buffer+2;
+  }
+  if (limit>buffer+1) /* check if the change has ended */
+  if (buffer[0]==the_at_sign) {
+    @<Lowerc...@>;
+    @<Check for erron...@>;
+    if (buffer[1]==@`x' || buffer[1]==@`y') {
+    loc=buffer+2; err_print("! Where is the matching @@z?");
+@.Where is the match...@>
+    }
+    else if (buffer[1]==@`z') {
+      prime_the_change_buffer(); changing=!changing; print_where=1;
+    }
+  }
+}
+
+@ At the end of the program, we will tell the user if the change file
+had a line that didn't match any relevant line in |web_file|.
+
+@<Funct...@>=
+check_complete(){
+  if (change_limit!=0) { /* |changing| is 0 */
+    strncpy(buffer,change_buffer,change_limit-change_buffer+1);
+    limit=change_limit-change_buffer+buffer;
+    changing=1; loc=change_limit;
+    err_print("! Change file entry did not match");
+  @.Change file entry did not match@>
+  }
+}
+
+@* Storage of identifiers and module names.
+Both \.{WEAVE} and \.{TANGLE} store identifiers, module names and
+other strings in a large array of |ASCII|s, called |byte_mem|.
+Information about the names is kept in the array |name_dir|, whose
+elements are structures of type \&{name\_info}, containing a pointer into
+the |byte_mem| array (the address where the name begins) and other data.
+A \&{name\_pointer} variable is a pointer into |name_dir|.
+
+This module has to go after the module that defines the types of the
+other elements, so it has a special name.
+
+@d max_bytes = 90000 /* the number of bytes in identifiers,
+  index entries, and module names */
+@d max_names = 4000 /* number of identifiers, strings, module names;
+  must be less than 10240 */
+
+@<Definitions that...@>=
+typedef struct name_info {
+  ASCII *byte_start; /* beginning of the name in |byte_mem| */
+  ===> @<More elements of |name_info| structure@>@;
+} name_info; /* contains information about an identifier or module name */
+typedef name_info *name_pointer; /* pointer into array of |name_info|s */
+ASCII byte_mem[max_bytes]; /* characters of names */
+ASCII *byte_mem_end = byte_mem+max_bytes-1; /* end of |byte_mem| */
+name_info name_dir[max_names]; /* information about names */
+name_pointer name_dir_end = name_dir+max_names-1; /* end of |name_dir| */
+
+@ The actual sequence of characters in the name pointed to by a 
+|name_pointer|  |p| appears in positions 
+|p->byte_start| to |(p+1)->byte_start|, inclusive.
+The |print_id| macro prints this text on the user's terminal.
+
+@d length(c) = (c+1)->byte_start-(c)->byte_start /* the length of a name */
+@d print_id(c) = ASCII_write((c)->byte_start,length((c)))
+  /* print identifier or module name */
+
+@ The first unused position in |byte_mem| and |name_dir| is
+kept in |byte_ptr| and |name_ptr|, respectively.  Thus we
+usually have |name_ptr->byte_start=byte_ptr|, and certainly
+we want to keep |name_ptr<=name_dir_end| and |byte_ptr<=byte_mem_end|.
+
+@<Defini...@>=
+name_pointer name_ptr; /* first unused position in |byte_start| */
+ASCII *byte_ptr; /* first unused position in |byte_mem| */
+
+@ @<Init...@>=
+name_dir->byte_start=byte_ptr=byte_mem; /* position zero in both arrays */
+name_ptr=name_dir+1; /* |name_dir[0]| will not be used */
+name_ptr->byte_start=byte_mem; /* this makes name 0 of length zero */
+
+@ The names of identifiers are found by computing a hash address |h| and
+then looking at strings of bytes signified by the |name_pointer|s
+|hash[h]|, |hash[h]->link|, |hash[h]->link->link|, \dots,
+until either finding the desired name or encountering the null pointer.
+
+@<More elements of |name...@>=
+struct name_info *link;
+
+@ The hash table itself
+consists of |hash_size| entries of type |name_pointer|, and is
+updated by the |id_lookup| procedure, which finds a given identifier
+and returns the appropriate |name_pointer|. The matching is done by the
+function |names_match|, which is slightly different in
+\.{WEAVE} and \.{TANGLE}.  If there is no match for the identifier,
+it is inserted into the table.
+
+@d hash_size = 353 /* should be prime */
+
+@<Defini...@>=
+typedef name_pointer *hash_pointer;
+name_pointer hash[hash_size]; /* heads of hash lists */
+hash_pointer hash_end = hash+hash_size-1; /* end of |hash| */
+hash_pointer h; /* index into hash-head array */
+
+@ Initially all the hash lists are empty.
+
+@<Init...@>=
+for (h=hash; h<=hash_end; *h++=NULL) ;
+
+@ Here is the main procedure for finding identifiers:
+
+@u name_pointer
+id_lookup(first,last,t) /* looks up a string in the identifier table */
+ASCII *first; /* first character of string */
+ASCII *last; /* last character of string plus one */
+eight_bits t; /* the |ilk|; used by \.{WEAVE} and by \.{TANGLE} for macros */
+{
+  ASCII *i=first; /* position in |buffer| */
+  int h; /* hash code */
+  int l; /* length of the given identifier */
+  name_pointer p; /* where the identifier is being sought */
+  if (last==NULL) for (last=first; *last!='\0'; last++);
+  l=last-first; /* compute the length */
+  @<Compute the hash code |h|@>;
+  @<Compute the name location |p|@>;
+  if (p==name_ptr) @<Enter a new name into the table at position |p|@>;
+  return(p);
+}
+
+@ A simple hash code is used: If the sequence of
+ASCII codes is $c_1c_2\ldots c_n$, its hash value will be
+$$(2^{n-1}c_1+2^{n-2}c_2+\cdots+c_n)\,\bmod\,|hash_size|.$$
+
+@<Compute the hash...@>=
+h=*i; while (++i<last) h=(h+h+*i) % hash_size;
+
+@ If the identifier is new, it will be placed in position |p=name_ptr|,
+otherwise |p| will point to its existing location.
+
+@<Compute the name location...@>=
+p=hash[h];
+while (p && !names_match(p,first,l,t)) p=p->link;
+if (p==NULL) {
+  p=name_ptr; /* the current identifier is new */
+  p->link=hash[h]; hash[h]=p; /* insert |p| at beginning of hash list */
+}
+
+@ The information associated with a new identifier must be initialized
+in a slightly different way in \.{WEAVE} than in \.{TANGLE}; hence the
+|init_p| procedure.
+
+@<Enter a new name...@>= {
+  if (byte_ptr+l>byte_mem_end) overflow("byte memory");
+  if (name_ptr>=name_dir_end) overflow("name");
+  strncpy(byte_ptr,first,l);
+  (++name_ptr)->byte_start=byte_ptr+=l;
+  init_p(p,t); /* set ilk */
+}
+
+@ The names of modules are stored in |byte_mem| together
+with the identifier names, but a hash table is not used for them because
+\.{TANGLE} needs to be able to recognize a module name when given a prefix of
+that name. A conventional binary seach tree is used to retrieve module names,
+with fields called |llink| and |rlink| (where |llink| takes the place
+of |link|).  The root of this tree is stored in |name_dir->rlink|;
+this will be the only information in |name_dir[0]|.
+
+Since the space used by |rlink| has a different function for
+identifiers than for module names, we declare it as a |union|.
+
+@d llink = link /* left link in binary search tree for module names */
+@d rlink = dummy.Rlink /* right link in binary search tree for module names */
+@d root = name_dir->rlink /* the root of the binary search tree
+  for module names */
+
+@<More elements of |name...@>=
+union {
+  struct name_info *Rlink; /* right link in binary search tree for module
+    names */
+  eight_bits Ilk; /* used by identifiers in \.{WEAVE} only */
+} dummy;
+
+@ @<Init...@>=
+root=NULL; /* the binary search tree starts out with nothing in it */
+
+@ The |mod_lookup| procedure finds a module name in the
+search tree, after inserting it if necessary, and returns a pointer to
+where it was found.
+
+According to the rules of \.{WEB}, no module name should be a proper
+prefix of another, so a ``clean'' comparison should occur between any
+two names. The result of |mod_lookup| is |NULL| if this prefix condition
+is violated. An error message is printed when such violations are detected.
+
+@d less = 0 /* the first name is lexicographically less than the second */
+@d equal = 1 /* the first name is equal to the second */
+@d greater = 2 /* the first name is lexicographically greater than the second */
+@d prefix = 3 /* the first name is a proper prefix of the second */
+@d extension = 4 /* the first name is a proper extension of the second */
+
+@<Other...@>=
+name_pointer install_node();
+
+@ @u name_pointer
+mod_lookup(k,l) /* finds module name */
+ASCII *k; /* first character of name */
+ASCII *l; /* last character of name */
+{
+  short c = greater; /* comparison between two names */
+  name_pointer p = root; /* current node of the search tree */
+  name_pointer q = name_dir; /* father of node |p| */
+  while (p) {
+    c=web_strcmp(k,l+1,p->byte_start,(p+1)->byte_start);
+    q=p;
+    switch(c) {
+      case less: p=p->llink; continue;
+      case greater: p=p->rlink; continue;
+      case equal: return p;
+      default: err_print("! Incompatible section names"); return NULL;
+@.Incompatible section names@>
+    }
+  }
+  return(install_node(q,c,k,l-k+1));
+}
+
+@ This function is like |strcmp|, but it does not assume the strings
+are null-terminated.
+
+@u
+web_strcmp(j,j1,k,k1) /* fuller comparison than |strcmp| */
+ASCII *j; /* beginning of first string */
+ASCII *j1; /* end of first string plus one */
+ASCII *k; /* beginning of second string */
+ASCII *k1; /* end of second string plus one */
+{
+  while (k<k1 && j<j1 && *j==*k) k++, j++;
+  if (k==k1) if (j==j1) return equal;
+    else return extension;
+  else if (j==j1) return prefix;
+  else if (*j<*k) return less;
+  else return greater;
+}
+
+@ The reason we initialized |c| to |greater| is so that
+|name_pointer| will make |name_dir->rlink| point to the root of the tree
+when |q=name_dir|, that is, the first time it is called.
+
+The information associated with a new node must be initialized
+in a slightly different way in \.{WEAVE} than in \.{TANGLE}; hence the
+|init_node| procedure.
+
+@u name_pointer
+install_node(parent,c,j,name_len) /* install a new node in the tree */
+name_pointer parent; /* parent of new node */
+int c; /* right or left? */
+ASCII *j; /* where replacement text starts */
+int name_len; /* length of replacement text */
+{
+  name_pointer node=name_ptr; /* new node */
+  if (byte_ptr+name_len>byte_mem_end) overflow("byte memory");
+  if (name_ptr==name_dir_end) overflow("name");
+  if (c==less) parent->llink=node; else parent->rlink=node;
+  node->llink=NULL; node->rlink=NULL;
+  init_node(node);
+  strncpy(byte_ptr,j,name_len);
+  (++name_ptr)->byte_start=byte_ptr+=name_len;
+  return(node);
+}
+
+@ The |prefix_lookup| procedure is supposed to find exactly one module
+name that has $|k|\ldots|l|$ as a prefix. Actually the algorithm
+silently accepts also the situation that some module name is a prefix of
+$|k|\ldots|l|$, because the user who painstakingly typed in more than
+necessary probably doesn't want to be told about the wasted effort.
+
+@u name_pointer
+prefix_lookup(k,l) /* finds module name given a prefix */
+ASCII *k; /* first char of prefix */
+ASCII *l; /* last char of prefix */
+{
+  short c = greater; /* comparison between two names */
+  short count = 0; /* the number of hits */
+  name_pointer p = root; /* current node of the search tree */
+  name_pointer q = NULL;
+    /* another place to resume the search after one is done */
+  name_pointer r = NULL; /* extension found */
+  while (p) {
+    c=web_strcmp(k,l+1,p->byte_start,(p+1)->byte_start);
+    switch(c) {
+      case less: p=p->llink; break;
+      case greater: p=p->rlink; break;
+      default: r=p; count++; q=p->rlink; p=p->llink;
+    }
+    if (p==NULL) {
+      p=q; q=NULL;
+    }
+  }
+  if (count==0) err_print("! Name does not match");
+@.Name does not match@>
+  if (count>1) err_print("! Ambiguous prefix");
+@.Ambiguous prefix@>
+  return(r); /* the result will be |NULL| if there was no match */
+}
+
+@ The last component of |name_info| is different for \.{TANGLE} and
+\.{WEAVE}.  In \.{TANGLE}, if |p| is a pointer to a module name,
+|p->equiv| is a pointer to its replacement text, an element of the
+array |text_info|.  In \.{WEAVE}, on the other hand, if
+|p| points to an identifier, |p->xref| is a pointer to its
+list of cross-references, an element of the array |xmem|.  The make-up
+of |text_info| and |xmem| is discussed in the \.{TANGLE} and \.{WEAVE}
+source files, respectively; here we just declare a common field
+|equiv_or_xref| as a pointer to an |ASCII|.
+
+@<More elements of |name...@>=
+ASCII *equiv_or_xref; /* info corresponding to names */
+
+@* Reporting errors to the user.
+A global variable called |history| will contain one of four values
+at the end of every run: |spotless| means that no unusual messages were
+printed; |harmless_message| means that a message of possible interest
+was printed but no serious errors were detected; |error_message| means that
+at least one error was found; |fatal_message| means that the program
+terminated abnormally. The value of |history| does not influence the
+behavior of the program; it is simply computed for the convenience
+of systems that might want to use such information.
+
+@d spotless = 0 /* |history| value for normal jobs */
+@d harmless_message = 1 /* |history| value when non-serious info was printed */
+@d error_message = 2 /* |history| value when an error was noted */
+@d fatal_message = 3 /* |history| value when we had to stop prematurely */
+@d mark_harmless = {if (history==spotless) history=harmless_message;}
+@d mark_error = history=error_message
+
+@<Definit...@>=
+int history=spotless; /* indicates how bad this run was */
+
+@ The command `|err_print("! Error message")|' will report a syntax error to
+the user, by printing the error message at the beginning of a new line and
+then giving an indication of where the error was spotted in the source file.
+Note that no period follows the error message, since the error routine
+will automatically supply a period.
+
+The actual error indications are provided by a procedure called |error|.
+However, error messages are not actually reported during phase one,
+since errors detected on the first pass will be detected again
+during the second.
+
+@<Functions...@>=
+err_print(s) /* prints `\..' and location of error message */
+char *s;
+{
+  ASCII *k,*l; /* pointers into |buffer| */
+  printf("\n%s",(s==(char *)0) ? "Bad error message!!!" : s);
+  if (setting_up) {
+printf("\nError occurred while scanning arguments or opening output files. ");
+  } else {
+	  @<Print error location based on input buffer@>;
+  }
+  fflush(stdout); mark_error;
+}
+
+@ The error locations can be indicated by using the global variables
+|loc|, |cur_line|, |cur_file_name| and |changing|,
+which tell respectively the first
+unlooked-at position in |buffer|, the current line number, the current
+file, and whether the current line is from |change_file| or |cur_file|.
+This routine should be modified on systems whose standard text editor
+has special line-numbering conventions.
+@^system dependencies@>
+
+@<Print error location based on input buffer@>=
+if (changing) printf(". (l. %d of change file)\n", change_line);
+else if (include_depth==0) printf(". (l. %d)\n", cur_line);
+  else printf(". (l. %d of include file %s)\n", cur_line, cur_file_name);
+l= (loc>=limit? limit: loc);
+if (l>buffer) {
+  for (k=buffer; k<l; k++)
+    if (*k=='\t') putchar(' ');
+    else putchar(xchr[*k]); /* print the characters already read */
+  putchar('\n');
+  for (k=buffer; k<l; k++) putchar(' '); /* space out the next line */
+}
+for (k=l; k<limit; k++) putchar(xchr[*k]); /* print the part not yet read */
+if (*limit==@`|') putchar('|'); /* end of \cee\ text in module names */
+putchar(' '); /* to separate the message from future asterisks */
+
+@ When no recovery from some error has been provided, we have to wrap
+up and quit as graciously as possible.  This is done by calling the
+function |wrap_up| at the end of the code.
+
+@d fatal(s1,s2) = {
+  printf(s1); err_print(s2);
+  history=fatal_message; wrap_up();
+}
+
+@ Sometimes the program's behavior is far different from what it should be,
+and \.{WEB} prints an error message that is really for the \.{WEB}
+maintenance person, not the user. In such cases the program says
+|confusion("indication of where we are")|.
+
+@d confusion(s) = fatal("\n! This can't happen: ",s)
+@.This can't happen@>
+
+@ An overflow stop occurs if \.{WEB}'s tables aren't large enough.
+
+@d overflow(s) = {
+  fatal("\n! Sorry, capacity exceeded: ",s);
+}
+@.Sorry, x capacity exceeded@>
+
+@ Some implementations may wish to pass the |history| value to the
+operating system so that it can be used to govern whether or not other
+programs are started. Here, for instance, we pass the operating system
+a status of 0 if and only if only harmless messages were printed.
+@^system dependencies@>
+
+@<Func...@>=
+wrap_up() {
+  putchar('\n');
+  @<Print the job |history|@>;
+  if (history > harmless_message) exit(1);
+  else exit(0);
+}
+
+@ @<Print the job |history|@>=
+switch (history) {
+case spotless: printf("(No errors were found.)\n"); break;
+case harmless_message:
+  printf("(Did you see the warning message above?)\n"); break;
+case error_message:
+  printf("(Pardon me, but I think I spotted something wrong.)\n"); break;
+case fatal_message: printf("(That was a fatal error, my friend.)\n");
+} /* there are no other cases */
+
+@* Command line arguments.
+The user calls \.{CWEAVE} and \.{CTANGLE} with arguments on the command line.
+These are either file names or flags (beginning with |'-'|).
+The following globals are for communicating the user's desires to the rest
+of the program. The various file name variables contain strings with
+the names of those files.
+
+The only flag that affects \.{CWEAVE} is |"-x"|, whose status is kept in
+|no_xref|; it means the cross-referencing information---the index, the
+module name list, and the table of contents---is to be suppressed.
+No flags affect \.{CTANGLE}.
+
+@<Defin...@>=
+int argc; /* copy of |ac| parameter to |main| */
+char **argv; /* copy of |av| parameter to |main| */
+char C_file_name[max_file_name_length]; /* name of |C_file| */
+char tex_file_name[max_file_name_length]; /* name of |tex_file| */
+int no_xref; /* should \.{WEAVE} print an index? */
+
+@ We now must look at the command line arguments and set the file names
+accordingly.  At least one file name must be present: the \.{WEB}
+file.  It may have an extension, or it may omit it to get |".web"|
+added.  The \TeX\ output file name is formed by replacing the \.{WEB}
+file name extension by |".tex"|, and the \cee\ file name by replacing
+the extension by |C_file_extension|
+@<External...@>=extern char C_file_extension[];
+
+@ If there is another file name present among the arguments, it is the
+change file, again either with an extension or without one to get |".ch"|
+An omitted change file argument means that |"/dev/null"| should be used,
+when no changes are desired.
+@^system dependencies@>
+
+@<Function...@>=
+scan_args()
+{
+  char *dot_pos, *index(); /* position of |'.'| in the argument */
+  boolean found_web=0,found_change=0; /* have these names have been seen? */
+  no_xref=0;
+  while (--argc > 0) {
+    if (**(++argv)!='-') {
+      if (!found_web) @<Make
+	|web_file_name|, |tex_file_name| and |C_file_name|@>@;
+      else if (!found_change) @<Make |change_file_name| from |fname|@>@;
+        else @<Print usage error message and quit@>;
+    }
+    else @<Handle flag argument@>;
+  }
+  if (!found_web) @<Print usage error message and quit@>;
+  if (!found_change) @<Set up null change file@>;
+}
+
+@ We use all of |*argv| for the |web_file_name| if there is a |'.'| in it,
+otherwise add |".web"|.  The other file names come from adding things
+after the dot.  We must check that there is enough room in
+|web_file_name| and the other arrays for the argument.
+
+@<Make |web_file_name|...@>=
+{
+  if (strlen(*argv) > max_file_name_length-5)
+    @<Complain about argument length@>;
+  if ((dot_pos=index(*argv,'.'))==NULL)
+    sprintf(web_file_name,"%s.web",*argv);
+  else {
+    sprintf(web_file_name,"%s",*argv);
+    @<Advance |dot_pos| to the last |'.'| in |*argv|@>
+    *dot_pos=0; /* string now ends where the dot was */
+  }
+  sprintf(tex_file_name,"%s.tex",*argv);
+  sprintf(C_file_name,"%s.%s",*argv,C_file_extension);
+  found_web=1;
+}
+
+@ @<Advance |dot_pos| to the last |'.'| in |*argv|@>=
+{ char *p;
+  p=dot_pos;
+  while (*++p != '\0')
+	if (*p=='.') dot_pos=p;
+}
+
+@ @<Make |change_file_name|...@>=
+{
+  if (strlen(*argv) > max_file_name_length-5)
+    @<Complain about argument length@>;
+  if ((dot_pos=index(*argv,'.'))==NULL)
+    sprintf(change_file_name,"%s.ch",*argv);
+  else sprintf(change_file_name,"%s",*argv);
+  found_change=1;
+}
+
+@ @<Set up null...@>= 
+#ifdef MSDOS
+strcpy(change_file_name,"NUL");
+#else
+strcpy(change_file_name,"/dev/null");
+#endif
+@ 
+We have two possible flags:
+\medskip
+\halign{\tabskip=1em\tt#\hfil&#\hfil\cr
+\omit{\bf Argument}\hfil&\omit\bf Function\hfil\cr
+-x&Turns off \.{WEAVE} cross-reference.\cr
+-I<pathname>&%
+Adds {\tt <pathname>} to the directories searched for included files.\cr
+}
+@<Handle flag...@>=
+{
+  switch((*argv)[1]) {
+	case 'x': 
+		no_xref=1;
+		break;
+	case 'I':
+		@<Add path name from {\tt -I} to search path@>@;
+		break;
+	default:
+		@<Complain about unknown option@>;
+		break;
+  }
+}
+
+@ @<Print usage error message and quit@>=
+{
+if (program==tangle)
+fatal("! Usage: tangle webfile[.web] [changefile[.ch]] [-Ipathname ...]\n",0)@;
+else 
+fatal("! Usage: weave webfile[.web] [changefile[.ch]] [-x] [-Ipathname ...]\n",
+	0);
+}
+
+@ @<Complain about arg...@>= fatal("! Filename %s too long\n", *argv);
+
+@ @<Complain about unk...@>= {
+printf("! Unknown option in argument %s\n", *argv); mark_harmless;
+}
+
+@* Output. Here is the code that opens the output file:
+@^system dependencies@>
+
+@<Defin...@>=
+FILE *C_file; /* where output of \.{TANGLE} goes */
+FILE *tex_file; /* where output of \.{WEAVE} goes */
+
+@ @<Scan arguments and open output files@>=
+scan_args();
+@<Add environment variable |"WEBPATH"| to search path@>@;
+if (program==tangle) {
+  if ((C_file=fopen(C_file_name,"w"))==NULL)
+    fatal("! Cannot open output file ", C_file_name);
+}
+else {
+  if ((tex_file=fopen(tex_file_name,"w"))==NULL)
+    fatal("! Cannot open output file ", tex_file_name);
+}
+
+@ The |update_terminal| procedure is called when we want
+to make sure that everything we have output to the terminal so far has
+actually left the computer's internal buffers and been sent.
+@^system dependencies@>
+
+@d update_terminal = fflush(stdout) /* empty the terminal output buffer */
+
+@ Terminal output uses |putchar| and |putc| when we have to
+translate from \.{WEB}'s code into the external character code,
+and |printf| when we just want to print strings.
+@^system dependencies@>
+@d new_line = putchar('\n') @d putxchar = putchar
+@d ASCII_write(a,b) = fflush(stdout), write(1,a,b) /* write on the standard output */
+@d line_write(c) = write(fileno(C_file),c) /* write on the C output file */
+@d C_printf(c,a) = fprintf(C_file,c,a)
+@d C_putc(c) = putc(c,C_file)
+
+@* Index.

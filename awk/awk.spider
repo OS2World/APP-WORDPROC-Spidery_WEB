@@ -1,0 +1,168 @@
+# Copyright 1989 by Norman Ramsey, Odyssey Research Associates
+# To be used for research purposes only
+# For more information, see file COPYRIGHT in the parent directory
+language AWK extension awk
+
+at_sign #
+
+module definition stmt use stmt
+# use as stmt is unavoidable since tangle introduces line breaks
+
+comment begin <"##"> end newline
+macros begin
+\def\commentbegin{\#} % we don't want \#\#
+macros end
+
+line begin <"#line"> end <"">
+
+default translation <*> mathness yes
+
+token identifier category math mathness yes
+token number category math mathness yes
+token newline category newline translation <> mathness maybe
+token pseudo_semi category ignore_scrap mathness no translation <opt-0>
+
+token \ category backslash translation <> mathness maybe
+token + category unorbinop
+token - category unorbinop
+token * category binop
+token / category binop
+token < category binop
+token > category binop
+token >> category binop translation <"\\GG">
+token = category equals translation <"\\K">
+token ~ category binop translation <"\\TI">
+token !~ category binop translation <"\\not\\TI">
+token & category binop translation <"\\amp">
+token % translation <"\\%"> category binop
+token ( category open
+token [ category lsquare
+token ) category close
+token ] category close
+token { translation <"\\;\\{"-indent> category lbrace
+token } translation <"\\}\\"-space> category close
+token , category binop translation <",\\,"-opt-3>
+
+token ; category semi translation <";"-space-opt-2> mathness no
+# stuff with semi can be empty in for statements
+open semi --> open
+semi semi --> semi
+semi close --> close
+semi --> binop
+
+# token : category colon
+# token | category bar
+token != name not_eq translation <"\\I"> category binop
+token <= name lt_eq translation <"\\L"> category binop
+token >= name gt_eq translation <"\\G"> category binop
+token == name eq_eq translation <"\\S"> category binop
+token && name and_and translation <"\\W"> category binop
+token || name or_or translation <"\\V"> category binop
+# token -> name minus_gt translation <"\\MG"> category binop
+token ++ name gt_gt category unop translation <"\\uparrow">
+token -- name lt_lt category unop translation <"\\downarrow">
+# preunop is for unary operators that are prefix only
+token $ category preunop translation <"\\DO"> mathness yes
+
+default mathness yes translation <*>
+
+ilk pattern_like category math
+reserved BEGIN ilk pattern_like
+reserved END ilk pattern_like
+
+ilk if_like category if
+reserved if
+ilk else_like category else
+reserved else
+
+ilk print_like category math
+# math forces space between this and other math...
+reserved print ilk print_like
+reserved printf ilk print_like
+reserved sprintf ilk print_like
+
+
+ilk functions category unop mathness yes
+reserved length ilk functions
+reserved substr ilk functions
+reserved index ilk functions
+reserved split ilk functions
+reserved sqrt ilk functions
+reserved log  ilk functions
+reserved exp ilk functions
+reserved int ilk functions
+
+ilk variables category math mathness yes
+reserved NR ilk variables
+reserved NF ilk variables
+reserved FS ilk variables
+reserved RS ilk variables
+reserved OFS ilk variables
+reserved ORS ilk variables
+
+ilk for_like category for
+reserved for ilk for_like
+reserved while ilk for_like
+
+ilk in_like category binop translation <math_bin-*-"}"> mathness yes
+# translation <"\\"-space-*-"\\"-space>
+reserved in ilk in_like
+
+ilk stmt_like category math
+reserved break ilk stmt_like
+reserved continue ilk stmt_like
+reserved next ilk stmt_like
+reserved exit ilk stmt_like
+
+
+backslash newline --> math
+# The following line must be changed to make a backslash
+backslash <"\\backslash"> --> math
+
+math (binop|unorbinop) math --> math
+<"\\buildrel"> (binop|unorbinop) <"\\over{"> equals <"}"> --> binop
+equals --> binop
+(unop|preunop|unorbinop) math --> math
+# unorbinop can only act like unary op as *prefix*, not postfix
+math unop --> math
+math <"\\"-space> math --> math
+# concatenation
+
+math newline --> stmt
+newline --> ignore_scrap
+
+stmt <force> stmt --> stmt
+
+(open|lsquare) math close --> math
+
+math lbrace --> lbrace
+lbrace <force> stmt --> lbrace
+lbrace <outdent-force> close --> stmt
+
+if <"\\"-space> math --> ifmath
+ifmath lbrace --> ifbrace
+ifmath newline --> ifline
+ifbrace <force> stmt --> ifbrace
+ifbrace <outdent-force> close else <"\\"-space> if --> if
+ifbrace <outdent-force> close else lbrace --> ifbrace
+ifbrace <outdent-force> close else newline --> ifline
+ifbrace <outdent-force> close --> stmt
+(ifline|ifmath) <indent-force> stmt <outdent-force> else <"\\"-space> if --> if
+(ifline|ifmath) <indent-force> stmt <outdent-force> else lbrace --> ifbrace
+(ifline|ifmath) <indent-force> stmt <outdent-force> else newline --> ifline
+(ifline|ifmath) <indent-force> stmt <outdent-force> else --> ifmath
+(ifline|ifmath) <indent-force> stmt <outdent> --> stmt
+
+for <"\\"-space> math --> formath
+formath lbrace --> forbrace
+formath newline --> forline
+forbrace <force> stmt --> forbrace
+forbrace <outdent-force> close --> stmt
+(forline|formath) <indent-force> stmt <outdent> --> stmt
+
+
+
+? ignore_scrap --> #1
+
+
+
